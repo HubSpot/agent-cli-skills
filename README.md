@@ -1,2 +1,2 @@
 # agent-cli-skills
-Skills for the HubSpot Developer Agent
+Skills for the HubSpot Agent CLI
