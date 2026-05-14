@@ -1,0 +1,30 @@
+{
+  "name": "Example Contact Flow — Set Lead Status on Lead Enrollment",
+  "type": "CONTACT_FLOW",
+  "enabled": false,
+  "enrollmentCriteria": {
+    "filterGroups": [
+      {
+        "filters": [
+          {
+            "property": "lifecyclestage",
+            "operation": {
+              "operationType": "ENUMERATION",
+              "operator": "IS_ANY_OF",
+              "values": ["lead"]
+            }
+          }
+        ]
+      }
+    ],
+    "type": "OR"
+  },
+  "actions": [
+    {
+      "type": "SET_CONTACT_PROPERTY",
+      "propertyName": "hs_lead_status",
+      "newValue": "IN_PROGRESS"
+    }
+  ],
+  "suppressionListIds": []
+}
