@@ -1,0 +1,10 @@
+name: Dependency Review
+on: [pull_request]
+jobs:
+  dependency-review:
+    name: Dependency Review
+    uses: HubSpotEngineering/github-actions-cloud/.github/workflows/dependency-review.yml@master
+    secrets: inherit
+    permissions:
+      contents: read
+      pull-requests: write
