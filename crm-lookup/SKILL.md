@@ -1,159 +1,99 @@
 ---
 name: crm-lookup
-description: Find and retrieve specific CRM records — deals by name, contacts by email, companies by domain — and traverse associations to get the full account picture.
+description: Find a specific CRM record by ID, email, domain, or name fragment, and traverse associations for the full account picture.
 triggers:
-  - "look up deal"
   - "find contact"
-  - "search company"
   - "find contact by email"
-  - "company lookup"
-  - "deal lookup"
-  - "get contact by email"
   - "find company by domain"
-  - "get deal by name"
+  - "look up deal"
   - "contacts at this company"
   - "deals for this contact"
   - "find record"
-  - "contact lookup"
-  - "general deal lookup"
-  - "general company search"
-  - "general contact search"
-  - "contact info lookup"
 ---
 
-## Resources
+## Source of truth
 
-| File | When to use |
+`hubspot <command> --help` is authoritative. Read [`bulk-operations/SKILL.md`](../bulk-operations/SKILL.md) first — it owns JSONL piping, pagination, batch-get-via-stdin, and the safety flow for any write that comes after a lookup. This skill is read-only.
+
+## Pick properties from the live schema
+
+Schemas drift. Run `hubspot properties list --object <type>` for the live set. First-pass `--properties` for a brief:
+
+| Object | `--properties` |
 |---|---|
-| `resources/default-property-sets.md` | Recommended `--properties` lists for contacts, companies, deals, and tickets — what to request for a useful snapshot without fetching all fields |
+| contacts | `email,firstname,lastname,company,phone,lifecyclestage,hubspot_owner_id` |
+| companies | `name,domain,industry,annualrevenue,numberofemployees,hubspot_owner_id` |
+| deals | `dealname,amount,dealstage,closedate,hubspot_owner_id,hs_is_closed_won` |
+| tickets | `subject,hs_pipeline_stage,hs_ticket_priority,hubspot_owner_id` |
 
-## Context
-The most common agent task is finding a specific record before doing anything else. This skill covers looking up records when you have an ID, searching when you have partial info (email, domain, name fragment), and traversing associations to get the full account picture. The `~` operator matches whole words/tokens — for substring matching, fetch all results and filter client-side.
+Contact ad/campaign attribution lives on `hs_analytics_*` (e.g. `hs_analytics_source`, `hs_analytics_source_data_1`/`_2`, `hs_analytics_first_touch_converting_campaign`, `hs_analytics_last_touch_converting_campaign`). Full list: `hubspot properties list --object contacts | grep hs_analytics_`.
 
-## Property Reference
+## 1. Lookup by ID
 
-| Object | Key lookup properties |
-|---|---|
-| contacts | `email`, `firstname`, `lastname`, `company`, `phone`, `lifecyclestage`, `hs_lead_status`, `hubspot_owner_id` |
-| companies | `name`, `domain`, `industry`, `annualrevenue`, `numberofemployees`, `hubspot_owner_id` |
-| deals | `dealname`, `amount`, `dealstage`, `closedate`, `hubspot_owner_id`, `hs_is_closed_won` |
-| tickets | `subject`, `hs_pipeline_stage`, `hs_ticket_priority`, `hubspot_owner_id` |
-
-## Key Workflows
-
-### Lookup by ID (when you have it)
+Up to ~100 IDs in a single batch call:
 
 ```bash
-# Contact
-hubspot objects get --type contacts 12345 \
-  --properties email,firstname,lastname,company,phone,lifecyclestage,hubspot_owner_id
-
-# Company
-hubspot objects get --type companies 67890 \
-  --properties name,domain,industry,annualrevenue,numberofemployees,hubspot_owner_id
-
-# Deal
-hubspot objects get --type deals 11111 \
-  --properties dealname,amount,dealstage,closedate,hubspot_owner_id
-
-# Ticket
-hubspot objects get --type tickets 22222 \
-  --properties subject,hs_pipeline_stage,hs_ticket_priority,hubspot_owner_id
+hubspot objects get --type contacts 12345 67890 23456 --properties email,firstname,lastname,company,phone,lifecyclestage
 ```
 
-### Find Contact by Email (exact match)
+## 2. Find one by email / domain (exact match)
+
+`email`/`domain` are exact-match — normalize to lowercase. Multiple `--filter` flags are OR'd.
 
 ```bash
-hubspot objects search --type contacts \
-  --filter "email=user@example.com" \
+hubspot objects search --type contacts --filter "email=jane@acme.com" \
   --properties email,firstname,lastname,company,lifecyclestage,hubspot_owner_id
-```
 
-### Find Company by Domain
-
-```bash
-hubspot objects search --type companies \
-  --filter "domain=acme.com" \
+hubspot objects search --type companies --filter "domain=acme.com" \
   --properties name,domain,industry,annualrevenue,hubspot_owner_id
+
+# OR — multiple emails in one call
+hubspot objects search --type contacts \
+  --filter "email=alice@acme.com" --filter "email=bob@acme.com" --properties email,firstname
 ```
 
-### Find Deal by Name (partial match)
+## 3. Find by partial name (token + client-side narrowing)
 
-`~` (CONTAINS_TOKEN) matches whole words. Use it to find deals containing a keyword, then verify client-side.
+`~` is CONTAINS_TOKEN — matches whole space-separated words. `dealname~acme` finds "Acme Renewal" but **not** "AcmeCorp". For substring, pipe to `jq`. There's no full-text search across all fields — pick the property.
 
 ```bash
-# Find deals whose name contains "acme" as a whole word
-hubspot objects search --type deals \
-  --filter "dealname~acme" \
-  --properties dealname,amount,dealstage,closedate,hubspot_owner_id
-
-# Narrow further client-side when the token match is too broad
-hubspot objects search --type deals \
-  --filter "dealname~acme" \
-  --properties dealname,amount,dealstage,closedate \
+hubspot objects search --type deals --filter "dealname~acme" --properties dealname,amount,dealstage \
 | jq -c 'select(.properties.dealname | ascii_downcase | contains("acme corp"))'
 ```
 
-### Find All Contacts at a Company
+## 4. Find all associated records (two CLI calls, not xargs)
+
+Pattern: `associations list` → `jq -c '{id}'` → `objects get` batch. **Never** `xargs -I{} hubspot objects get …` — that spawns one process per record. Use **plural** in `--from` (`contacts:`, `companies:`, `deals:`); `--help` shows singular but only plural avoids a warning.
 
 ```bash
-# Step 1: get the company record to confirm the company ID
-hubspot objects search --type companies --filter "domain=acme.com" --properties name
+# All contacts at a company
+hubspot associations list --from companies:67890 --to contacts \
+| jq -c '{id}' \
+| hubspot objects get --type contacts --properties email,firstname,lastname,jobtitle
 
-# Step 2: list contacts associated to that company
-hubspot associations list --from companies:67890 --to contacts --format jsonl \
-| jq -r '.id' \
-| xargs -I{} hubspot objects get --type contacts {} \
-    --properties email,firstname,lastname,jobtitle,hubspot_owner_id
-```
-
-### Find All Open Deals for a Contact
-
-```bash
-hubspot associations list --from contacts:12345 --to deals --format jsonl \
-| jq -r '.id' \
-| xargs -I{} hubspot objects get --type deals {} \
-    --properties dealname,amount,dealstage,closedate,hubspot_owner_id \
+# Open deals for a contact (filter client-side; "open" varies by pipeline)
+hubspot associations list --from contacts:12345 --to deals | jq -c '{id}' \
+| hubspot objects get --type deals --properties dealname,amount,dealstage,hs_is_closed \
 | jq -c 'select(.properties.hs_is_closed != "true")'
 ```
 
-### Find Contacts by Multiple Emails (OR)
-
-Each `--filter` flag is an OR group. Use multiple flags to match several emails at once.
-
-```bash
-hubspot objects search --type contacts \
-  --filter "email=alice@acme.com" \
-  --filter "email=bob@acme.com" \
-  --filter "email=carol@acme.com" \
-  --properties email,firstname,lastname,company
-```
-
-### Get a Contact's Company and Open Deals Together
+## 5. Get a record plus its associations
 
 ```bash
 contact_id=12345
+hubspot objects get --type contacts $contact_id --properties email,firstname,lastname,company,lifecyclestage
 
-# Contact properties
-hubspot objects get --type contacts $contact_id \
-  --properties email,firstname,lastname,company,lifecyclestage,hubspot_owner_id
+# Associated company (usually one)
+hubspot associations list --from contacts:$contact_id --to companies | jq -c '{id}' | head -1 \
+| hubspot objects get --type companies --properties name,domain,industry,annualrevenue
 
-# Associated company
-hubspot associations list --from contacts:$contact_id --to companies --format jsonl \
-| jq -r '.id' \
-| head -1 \
-| xargs -I{} hubspot objects get --type companies {} \
-    --properties name,domain,industry,annualrevenue
-
-# Open deals
-hubspot associations list --from contacts:$contact_id --to deals --format jsonl \
-| jq -r '.id' \
-| xargs -I{} hubspot objects get --type deals {} \
-    --properties dealname,amount,dealstage,closedate
+# Associated deals
+hubspot associations list --from contacts:$contact_id --to deals | jq -c '{id}' \
+| hubspot objects get --type deals --properties dealname,amount,dealstage,closedate
 ```
 
-## Known Limitations
-- `~` (CONTAINS_TOKEN) matches whole words only. `dealname~acme` will not match "AcmeCorp" (no space). For substring matching, fetch all results and filter client-side (e.g. check whether `dealname` contains the substring after lowercasing).
-- No full-text search across all fields. Search targets a specific property.
-- For > 100 results, use the pagination loop from the `bulk-operations` skill.
-- Exact email match is case-sensitive in HubSpot's search API. Use lowercase.
+## Constraints
+
+- Search returns ≤100 per page. For more, use the pagination loop in `bulk-operations/SKILL.md`.
+- `~` is token-based; substring filtering happens in `jq` after the search.
+- If the lookup feeds a write (update, delete, merge), follow the `--dry-run` → digest → `--confirm` flow in `bulk-operations/SKILL.md`.

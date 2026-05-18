@@ -1,165 +1,98 @@
 ---
 name: team-ownership
-description: Enable teams to work together with clear ownership by assigning, reassigning, and auditing record ownership across contacts, deals, and companies.
+description: Assign and reassign CRM record ownership, audit who-owns-what across object types, and handle rep transitions. Built on `bulk-operations`.
 triggers:
   - "assign owner"
   - "reassign records"
-  - "team visibility"
-  - "ownership"
+  - "ownership audit"
   - "rep leaving"
   - "transfer records"
   - "change owner"
-  - "find records owned by rep"
+  - "find records owned by"
+  - "redistribute accounts"
 ---
 
-## Resources
+Prereq: read `bulk-operations/SKILL.md` first. JSONL piping, pagination, dry-run/digest/confirm, and `hubspot history` recovery live there. Reshape patterns live in `bulk-operations/resources/json-patterns.md`.
 
-| File | When to use |
-|---|---|
-| `resources/association-graph.md` | Which object types can be associated to which, with exact CLI syntax for every valid pair in both directions |
-| `resources/bulk-reassignment.sh` | Ready-to-run script for reassigning all records of a given type from one owner to another, with dry-run and confirmation prompt |
+`hubspot_owner_id` is a string field on `contacts`, `companies`, `deals`, and `tickets`. Owners are CRM users — `hubspot owners list` returns them; there is no `teams` object, so team-level views are client-side groupings by `hubspot_owner_id`.
 
-## Context
-Ownership fields connect CRM records to the people responsible for them. This skill covers discovering owner IDs, finding records owned by specific reps, bulk reassigning records when reps leave or territories change, and managing the associations that give teams full visibility into account relationships.
+## 1. Resolve email → owner ID
 
-## Property Reference
-
-| Property | Type | Notes |
-|---|---|---|
-| hubspot_owner_id | string | Numeric owner ID — exists on contacts, companies, deals, and tickets |
-
-Owner IDs are numeric strings (e.g., `"12345"`). Always resolve owner IDs with `hubspot owners list` before filtering or updating records.
-
-## Key Workflows
-
-### Get All Owners and Their IDs
+Never hardcode IDs — they are portal-specific. Resolve, then cache:
 
 ```bash
-# Table format — useful for scanning owner IDs and emails
-hubspot owners list --format table
-
-# JSONL — use when extracting a specific owner ID
-hubspot owners list
-
-# Find a specific owner's ID by email
-hubspot owners list | jq -r 'select(.email == "rep@company.com") | .id'
+FROM_ID=$(hubspot owners list | jq -r 'select(.email=="sarah@company.com") | .id')
+TO_ID=$(hubspot owners list | jq -r 'select(.email=="mike@company.com")  | .id')
 ```
 
-### Find All Records Owned by a Specific Rep
+## 2. Find records for an owner
+
+Same filter across all four object types. Add object-specific `--properties` for context. Unowned records use the `!property` form.
 
 ```bash
-# Contacts
-hubspot objects search --type contacts \
-  --filter "hubspot_owner_id=12345" \
-  --properties email,firstname,lastname,lifecyclestage
+hubspot objects search --type contacts  --filter "hubspot_owner_id=$FROM_ID" --properties email,firstname,lifecyclestage
+hubspot objects search --type companies --filter "hubspot_owner_id=$FROM_ID" --properties name,domain
+hubspot objects search --type deals     --filter "hubspot_owner_id=$FROM_ID" --properties dealname,dealstage,amount
+hubspot objects search --type tickets   --filter "hubspot_owner_id=$FROM_ID" --properties subject,hs_pipeline_stage
 
-# Deals
-hubspot objects search --type deals \
-  --filter "hubspot_owner_id=12345" \
-  --properties dealname,dealstage,amount,closedate
-
-# Companies
-hubspot objects search --type companies \
-  --filter "hubspot_owner_id=12345" \
-  --properties name,industry
-
-# Tickets
-hubspot objects search --type tickets \
-  --filter "hubspot_owner_id=12345" \
-  --properties subject,hs_pipeline_stage,hs_ticket_priority
+# Records with no owner at all
+hubspot objects search --type deals --filter "!hubspot_owner_id" --properties dealname,amount
 ```
 
-### Bulk Reassign All Records from One Rep to Another
+>100 hits — page with the `--after` loop from `bulk-operations`. Counting only: pipe to `wc -l`.
 
-Always resolve owner IDs from email addresses first — never hardcode them.
+## 3. Bulk reassign — search → update
+
+Reshape each search row into `{id, properties:{hubspot_owner_id}}` and pipe to `objects update`. Always dry-run first; for >100 rows the dry-run emits a digest + `apply_command_hint` — re-run with `--digest`/`--confirm` (see `bulk-operations/SKILL.md` § "Safe destructive workflow").
 
 ```bash
-# Step 1: resolve numeric owner IDs from email addresses
-FROM_ID=$(hubspot owners list | jq -r 'select(.email == "sarah@company.com") | .id')
-TO_ID=$(hubspot owners list | jq -r 'select(.email == "mike@company.com") | .id')
-
-# Step 2: reassign contacts (dry-run first)
+# Dry-run
 hubspot objects search --type contacts --filter "hubspot_owner_id=$FROM_ID" \
-| jq -c --arg to "$TO_ID" '{id, properties: {hubspot_owner_id: $to}}' \
+| jq -c --arg to "$TO_ID" '{id, properties:{hubspot_owner_id:$to}}' \
 | hubspot objects update --type contacts --dry-run
 
-# Step 3: reassign contacts (execute)
+# Execute — ≤100: drop --dry-run.  >100: append --digest <hash> --confirm <count>.
 hubspot objects search --type contacts --filter "hubspot_owner_id=$FROM_ID" \
-| jq -c --arg to "$TO_ID" '{id, properties: {hubspot_owner_id: $to}}' \
+| jq -c --arg to "$TO_ID" '{id, properties:{hubspot_owner_id:$to}}' \
 | hubspot objects update --type contacts
-
-# Step 4: reassign deals
-hubspot objects search --type deals --filter "hubspot_owner_id=$FROM_ID" \
-| jq -c --arg to "$TO_ID" '{id, properties: {hubspot_owner_id: $to}}' \
-| hubspot objects update --type deals
-
-# Step 5: reassign companies
-hubspot objects search --type companies --filter "hubspot_owner_id=$FROM_ID" \
-| jq -c --arg to "$TO_ID" '{id, properties: {hubspot_owner_id: $to}}' \
-| hubspot objects update --type companies
 ```
 
-### Find Unowned Records
+Single-record assignment — no stdin, no jq:
 
 ```bash
-# Contacts with no owner assigned
-hubspot objects search --type contacts --filter "!hubspot_owner_id" \
-  --properties email,firstname,lastname,lifecyclestage
-
-# Deals with no owner
-hubspot objects search --type deals --filter "!hubspot_owner_id" \
-  --properties dealname,dealstage,amount
+hubspot objects update --type contacts 12345 --property hubspot_owner_id=$TO_ID
 ```
 
-### Assign an Owner to a Single Record
+## 4. Rep-leaves workflow
+
+Loop over the four object types the rep touches:
 
 ```bash
-hubspot objects update --type contacts <contact_id> \
-  --property hubspot_owner_id=67890
+FROM_ID=$(hubspot owners list | jq -r 'select(.email=="leaving@company.com")    | .id')
+TO_ID=$(hubspot  owners list | jq -r 'select(.email=="taking-over@company.com") | .id')
+
+for type in contacts companies deals tickets; do
+  echo "── $type ──"
+  hubspot objects search --type "$type" --filter "hubspot_owner_id=$FROM_ID" \
+  | jq -c --arg to "$TO_ID" '{id, properties:{hubspot_owner_id:$to}}' \
+  | hubspot objects update --type "$type" --dry-run
+done
 ```
 
-### View All Records Associated with a Contact
+Review each digest line, then re-run without `--dry-run` (adding `--digest`/`--confirm` per type when escalated). Mis-reassigned? `hubspot history --since 1h` lists the affected IDs.
+
+## 5. Team-level views (client-side grouping)
+
+Group records by `hubspot_owner_id`, join to `owners list` for human-readable emails:
 
 ```bash
-# Associated companies
-hubspot associations list --from contacts:123 --to companies
+hubspot objects search --type deals --filter "dealstage!=closedwon AND dealstage!=closedlost" \
+  --properties hubspot_owner_id --format json \
+| jq '.data | group_by(.properties.hubspot_owner_id)
+       | map({owner_id: .[0].properties.hubspot_owner_id, count: length})' \
+> /tmp/by-owner.json
 
-# Associated deals
-hubspot associations list --from contacts:123 --to deals
-
-# Associated tickets
-hubspot associations list --from contacts:123 --to tickets
+hubspot owners list \
+| jq --slurpfile by /tmp/by-owner.json -r \
+     '. as $o | $by[0][] | select(.owner_id==$o.id) | "\($o.email)\t\(.count)"'
 ```
-
-### Link a Contact to a Company
-
-```bash
-hubspot associations create --from contacts:123 --to companies:456
-```
-
-### Common Association Pairs
-
-| From | To | Use Case |
-|---|---|---|
-| contacts | companies | Link contact to their employer |
-| contacts | deals | Link contact involved in a deal |
-| contacts | tickets | Link contact to their support ticket |
-| deals | companies | Link deal to the company it's for |
-| deals | line_items | Link deal to its line items |
-| quotes | deals | Link quote to its deal |
-
-Association type IDs are resolved automatically — you do not need to specify them.
-
-### Bulk Create Associations from a File
-
-```bash
-# File format: one JSON object per line
-# {"from":"contacts:123","to":"companies:456"}
-cat associations.jsonl | hubspot associations create
-```
-
-## Known Limitations
-- Owner IDs are portal-specific numeric strings. Always run `hubspot owners list` to get the correct IDs for your portal — never hardcode them.
-- Bulk reassignments make one API call per record. For large rep transitions (> 100 records), use the pagination loop from the `bulk-operations` skill.
-- There is no "team" object in the CLI — team-level queries are not supported. Ownership is tracked per-rep (owner ID).
-- Association type IDs: some association directions support multiple types (e.g., primary vs. secondary). The CLI resolves the default type automatically.

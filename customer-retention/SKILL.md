@@ -1,184 +1,118 @@
 ---
 name: customer-retention
-description: Retain customers and reduce churn by identifying inactive customer contacts, flagging at-risk subscriptions, creating follow-up tasks, and logging check-in notes.
+description: Identify inactive/at-risk customers via CRM filters and create follow-up tasks at scale. Builds on `bulk-operations`; defers activity-creation specifics to `sales-execution`.
 triggers:
   - "customer retention"
   - "churn risk"
   - "inactive customers"
   - "customer follow-up"
-  - "account health"
-  - "customer success"
   - "at-risk accounts"
   - "customers not contacted"
   - "renewal"
+  - "account health"
 ---
 
 ## Resources
 
 | File | When to use |
 |---|---|
-| `resources/customer-health-signals.md` | Three-tier reference of churn signals and engagement indicators with exact CLI filter expressions for each |
-| `resources/retention-playbook.sh` | Daily health-check script: finds inactive customers, past-due subscriptions, and stale high-priority tickets, then creates follow-up tasks |
+| `resources/customer-health-signals.md` | Filter cookbook of churn signals — `--filter` expressions for `notes_last_contacted`, `hs_last_sales_activity_date`, `hs_email_optout`, stale tickets, subscription status. |
 
-## Context
-Customer retention requires proactive outreach to accounts showing signs of disengagement. This skill covers finding inactive customer contacts based on last contact date, flagging at-risk subscriptions, creating follow-up tasks at scale, getting company health overviews, and logging check-in notes — all using the CLI.
+## Prereqs
 
-## Property Reference — Contacts (Customers)
+Read `bulk-operations/SKILL.md` first — every read/write below uses its JSONL pipe, pagination, and dry-run/digest patterns. Activity-property tables and association rules live in `sales-execution/SKILL.md`.
 
-| Property | Type | Notes |
-|---|---|---|
-| lifecyclestage | enumeration | Filter on `customer` to scope to current customers |
-| notes_last_contacted | datetime | Last time a contact activity was logged |
-| notes_last_updated | datetime | Last CRM update |
-| hs_email_last_open_date | datetime | Last marketing email open |
-| hs_last_sales_activity_date | datetime | Read-only |
-| num_associated_deals | number | Read-only |
-| hs_email_optout | boolean | |
+Schema is portal-specific. Verify each property before filtering — e.g. `hubspot properties get --object contacts notes_last_contacted`, `... hs_last_sales_activity_date`, `... --object subscriptions hs_subscription_status`. If `subscriptions` returns 403, your token lacks `subscriptions-read` — use a private-app token with that scope.
 
-## Property Reference — Companies
-
-| Property | Type | Notes |
-|---|---|---|
-| hs_num_open_deals | number | Read-only |
-| hs_num_associated_contacts | number | Read-only |
-| annualrevenue | number | |
-| hs_last_sales_activity_date | datetime | Read-only |
-
-## Property Reference — Subscriptions
-
-| Property | Type | Notes |
-|---|---|---|
-| hs_subscription_status | enumeration | ACTIVE, CANCELLED, PAST_DUE, TRIALING |
-| hs_mrr | number | Monthly recurring revenue |
-| hs_arr | number | Annual recurring revenue |
-
-## Key Workflows
-
-### Find Inactive Customer Contacts
+## 1 — Find inactive customers
 
 ```bash
-# Customers not contacted in the last 90 days
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND notes_last_contacted<2025-01-01" \
-  --properties email,firstname,lastname,notes_last_contacted,hubspot_owner_id
+CUTOFF=$(date -v-60d +%Y-%m-%d 2>/dev/null || date -d '60 days ago' +%Y-%m-%d)
 
-# Customers who have never been contacted
+# No outreach in 60d (calls/notes/meetings update notes_last_contacted)
+hubspot objects search --type contacts \
+  --filter "lifecyclestage=customer AND notes_last_contacted<$CUTOFF" \
+  --properties email,firstname,notes_last_contacted,hubspot_owner_id
+
+# No sales activity in 60d (broader — also catches emails/tasks)
+hubspot objects search --type contacts \
+  --filter "lifecyclestage=customer AND hs_last_sales_activity_date<$CUTOFF" \
+  --properties email,firstname,hs_last_sales_activity_date
+
+# Never contacted
 hubspot objects search --type contacts \
   --filter "lifecyclestage=customer AND !notes_last_contacted" \
-  --properties email,firstname,lastname,hubspot_owner_id
+  --properties email,firstname
 ```
 
-### Bulk Create Follow-Up Tasks for Inactive Customers
+For more signals (email opt-out, stale tickets, no open deals) see `resources/customer-health-signals.md`. For >100 hits, use the pagination loop from `bulk-operations`.
+
+## 2 — Flag at-risk subscriptions
+
+`subscriptions` is a standard object (`hubspot objects types` confirms). Enum values for `hs_subscription_status` are portal-specific — verify before filtering, then plug the exact value in:
 
 ```bash
-# Save inactive customers first
+hubspot properties get --object subscriptions hs_subscription_status   # lists allowed values
+
+# Past-due — revenue at immediate risk (substitute your verified value)
+hubspot objects search --type subscriptions \
+  --filter "hs_subscription_status=past_due" \
+  --properties hs_recurring_billing_total,hs_subscription_status
+
+# Map an at-risk subscription to its contact for outreach
+hubspot associations list --from subscriptions:<sub_id> --to contacts --format jsonl
+```
+
+## 3 — Create a follow-up task or check-in note
+
+Activity creation lives in `sales-execution` (full property tables, note + meeting flows). One anchor example — unassociated tasks are invisible in the CRM UI, so always associate:
+
+```bash
+task_id=$(hubspot objects create --type tasks \
+  --property hs_task_subject="Q1 retention check-in" \
+  --property hs_task_priority=HIGH --property hs_task_status=NOT_STARTED \
+  --property hs_task_type=CALL --property hs_timestamp=$(date +%s)000 \
+  --format json | jq -r '.id')
+hubspot associations create --from tasks:$task_id --to contacts:<contact_id>
+```
+
+## 4 — Bulk task creation for a cohort
+
+Pipe a search through `jq` into one `objects create` call, then associate. Preview with `--dry-run` first (`bulk-operations` covers digest/confirm for >100 rows).
+
+```bash
+DUE_MS=$(( ($(date +%s) + 2*86400) * 1000 ))   # due in 2 days
+
+# 1. Capture the cohort (same file feeds both create + associate)
 hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND notes_last_contacted<2025-01-01" \
-  --properties email,firstname,hubspot_owner_id \
-  > inactive_customers.jsonl
+  --filter "lifecyclestage=customer AND notes_last_contacted<$CUTOFF" \
+  --properties firstname > /tmp/inactive.jsonl
 
-# Create a follow-up task for each
-cat inactive_customers.jsonl | while read line; do
-  contact_id=$(echo "$line" | jq -r '.id')
-  name=$(echo "$line" | jq -r '.properties.firstname')
+# 2. Build task payloads — one per contact
+jq -c --arg due "$DUE_MS" '{
+  contact_id: .id,
+  properties: {
+    hs_task_subject: ("Re-engage: " + (.properties.firstname // "customer")),
+    hs_task_priority: "HIGH", hs_task_status: "NOT_STARTED",
+    hs_task_type: "CALL", hs_timestamp: $due
+  }
+}' /tmp/inactive.jsonl > /tmp/task_payloads.jsonl
 
-  task_id=$(hubspot objects create --type tasks \
-    --property hs_task_subject="Check in with $name" \
-    --property hs_task_priority=MEDIUM \
-    --property hs_task_status=NOT_STARTED \
-    --property hs_task_type=CALL \
-    --property hs_timestamp=$(date +%s)000 \
-    --format json | jq -r '.data.id')
+# 3. Dry-run, then create (drop contact_id before piping)
+jq -c '{properties}' /tmp/task_payloads.jsonl | hubspot objects create --type tasks --dry-run | head
+jq -c '{properties}' /tmp/task_payloads.jsonl | hubspot objects create --type tasks > /tmp/created.jsonl
 
-  hubspot associations create --from tasks:$task_id --to contacts:$contact_id
-done
+# 4. Associate each new task to its contact (paste preserves order)
+paste <(jq -r '.id' /tmp/created.jsonl) <(jq -r '.contact_id' /tmp/task_payloads.jsonl) \
+  | while read task_id contact_id; do
+      hubspot associations create --from tasks:$task_id --to contacts:$contact_id
+    done
 ```
 
-### Find At-Risk Subscriptions
+One CLI call for the search, one for the create, then N for associations — no `xargs -I{}` per record. The output-order guarantee of `objects create` (one result per stdin line, in order — see `bulk-operations` "Output shape") is what makes the `paste` correct.
 
-```bash
-# Past due subscriptions
-hubspot objects search --type subscriptions \
-  --filter "hs_subscription_status=PAST_DUE" \
-  --properties hs_mrr,hs_arr,hs_subscription_status
+## Known gaps
 
-# Cancelled subscriptions (for win-back outreach)
-hubspot objects search --type subscriptions \
-  --filter "hs_subscription_status=CANCELLED" \
-  --properties hs_mrr,hs_subscription_status
-```
-
-### Get Company Health Overview
-
-```bash
-hubspot objects get --type companies <company_id> \
-  --properties name,hs_num_open_deals,hs_num_associated_contacts,annualrevenue,hs_last_sales_activity_date
-```
-
-### Flag At-Risk Customers with a Custom Property
-
-```bash
-# Create the property (run once per portal)
-hubspot properties create \
-  --object contacts \
-  --name churn_risk_flag \
-  --label "Churn Risk Flag" \
-  --type enumeration \
-  --field-type select
-
-# Flag inactive customers
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND notes_last_contacted<2025-01-01" \
-| jq -c '{id, properties: {churn_risk_flag: "AT_RISK"}}' \
-| hubspot objects update --type contacts
-```
-
-### Log a Customer Check-In Note
-
-```bash
-# Create the note
-hubspot objects create --type notes \
-  --property hs_note_body="Q1 check-in completed. Customer is happy with the product and exploring expansion into the analytics module." \
-  --property hs_timestamp=$(date +%s)000
-
-# Associate note to contact (mandatory)
-hubspot associations create --from notes:<note_id> --to contacts:<contact_id>
-
-# Also associate to company if applicable
-hubspot associations create --from notes:<note_id> --to companies:<company_id>
-```
-
-### Find All Active Subscriptions and Their MRR
-
-```bash
-hubspot objects search --type subscriptions \
-  --filter "hs_subscription_status=ACTIVE" \
-  --properties hs_mrr,hs_arr,hs_subscription_status
-
-# Sum total MRR — fetch with --format json, then sum .data[].properties.hs_mrr
-hubspot objects search --type subscriptions \
-  --filter "hs_subscription_status=ACTIVE" \
-  --format json \
-  | jq '[.data[].properties.hs_mrr | tonumber] | add'
-```
-
-### Find Customers Who Have Not Opened a Recent Email
-
-```bash
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND hs_email_last_open_date<2025-01-01 AND hs_email_optout!=true" \
-  --properties email,firstname,hs_email_last_open_date
-```
-
-### Get All Contacts at a Company
-
-```bash
-hubspot associations list --from companies:<company_id> --to contacts --format jsonl
-```
-
-## Known Limitations
-- No churn prediction or health score natively in HubSpot. Create custom properties (e.g., `churn_risk_flag`, `health_score`) to track these using data from your product analytics system.
-- Subscription management (creating or modifying subscriptions) requires a private app token (`export HUBSPOT_ACCESS_TOKEN=<token>`). User OAuth login has read access only for some subscription data.
-- No Conversations/Inbox API — live chat and email threads are not accessible from the CLI.
-- For > 100 inactive customers, use the pagination loop from the `bulk-operations` skill before running the task-creation loop.
-- `notes_last_contacted` is updated when activities (calls, notes, meetings) are logged and associated to the contact — not just when properties are edited.
+- No native churn-score / health-score property — track via a custom property.
+- No Lists API, no sequences/cadences API — re-engagement enrollment is not CLI-available.
+- `hubspot associations create` does not batch — one CLI call per pair.

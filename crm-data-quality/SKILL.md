@@ -1,6 +1,6 @@
 ---
 name: crm-data-quality
-description: Maintain a single, trusted source of customer data by finding incomplete records, normalizing field values, and auditing custom properties across contacts.
+description: Find incomplete records, normalize field values in bulk, dedupe with `hubspot objects merge`, and audit custom properties. Builds on `bulk-operations` for JSONL piping and dry-run/digest/confirm.
 triggers:
   - "clean up contacts"
   - "data quality"
@@ -8,150 +8,93 @@ triggers:
   - "missing fields"
   - "normalize data"
   - "find incomplete records"
-  - "audit contact data"
-  - "contacts missing properties"
+  - "merge duplicates"
+  - "audit properties"
 ---
 
-## Resources
+Read `bulk-operations/SKILL.md` first — JSONL piping, batch read, pagination, and dry-run/digest/confirm gating apply to every command below.
 
-| File | When to use |
-|---|---|
-| `resources/standard-contact-properties.md` | Full reference of standard contact property names, types, and enum values — check here before constructing filters or updates on contacts |
-| `resources/standard-company-properties.md` | Same for companies, including the complete `industry` enumeration |
+## Property discovery
 
-## Context
-Reliable CRM data is the foundation for accurate reporting, effective segmentation, and automation. This skill covers finding contacts with missing or inconsistent field values, normalizing data in bulk, and creating custom flag properties — all without leaving the terminal.
-
-## Property Reference
-
-| Property | Type | Notes |
-|---|---|---|
-| email | string | Primary identifier |
-| firstname | string | |
-| lastname | string | |
-| phone | string | |
-| mobilephone | string | |
-| company | string | Company name text (not the associated Company object) |
-| jobtitle | string | |
-| lifecyclestage | enumeration | subscriber, lead, marketingqualifiedlead, salesqualifiedlead, opportunity, customer, evangelist, other |
-| hs_lead_status | enumeration | NEW, OPEN, IN_PROGRESS, OPEN_DEAL, UNQUALIFIED, ATTEMPTED_TO_CONTACT, CONNECTED, BAD_TIMING |
-| hubspot_owner_id | string | Numeric owner ID (get from `hubspot owners list`) |
-| createdate | datetime | Read-only |
-| lastmodifieddate | datetime | Read-only |
-| hs_email_last_send_date | datetime | Read-only |
-
-## Key Workflows
-
-### Find Contacts Missing a Required Field
+Don't guess property names. List them:
 
 ```bash
-# Missing phone
-hubspot objects search --type contacts --filter "!phone" \
-  --properties email,firstname,lastname
-
-# Missing email
-hubspot objects search --type contacts --filter "!email" \
-  --properties firstname,lastname,company
-
-# Missing both first and last name (run separately, de-duplicate)
-hubspot objects search --type contacts --filter "!firstname"
-hubspot objects search --type contacts --filter "!lastname"
+hubspot properties list --object contacts --format table
+hubspot properties list --object contacts | jq -c 'select(.type=="enumeration") | {name, label}'
 ```
 
-### Find Contacts by Lifecycle Stage
+Same for `--object companies`, `deals`, or any custom type (`hubspot objects types`).
+
+## 1. Find incomplete records
+
+`!name` = NOT_HAS_PROPERTY (missing or empty). Bare `name` = HAS_PROPERTY. Within one `--filter`, chain with `AND`; multiple `--filter` flags are OR'd.
 
 ```bash
-# Find all leads
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=lead" \
-  --properties email,lifecyclestage,hs_lead_status
-
-# Find contacts in a specific lead status
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=lead AND hs_lead_status=NEW" \
-  --properties email,firstname,lastname
+hubspot objects search --type contacts --filter "!email" --properties firstname,lastname,company
+hubspot objects search --type contacts --filter "!phone AND !mobilephone" --properties email
+hubspot objects search --type contacts --filter "!hubspot_owner_id" --properties email,lifecyclestage
 ```
 
-### Bulk Normalize a Field Value
+For >100 results, use the pagination loop from `bulk-operations`.
+
+## 2. Normalize field values
+
+Search → reshape with `jq` → pipe into `update`. Always `--dry-run` first; `bulk-operations` covers digest/confirm escalation for >100 rows. Reshape patterns: `bulk-operations/resources/json-patterns.md`.
 
 ```bash
-# Dry-run first
-hubspot objects search --type contacts --filter "company=Acme Corp" \
-| jq -c '{id, properties: {company: "Acme Corporation"}}' \
+# Collapse spellings into one canonical value
+hubspot objects search --type contacts --filter "company~acme" \
+| jq -c '{id, properties:{company:"Acme Corporation"}}' \
 | hubspot objects update --type contacts --dry-run
 
-# Execute
-hubspot objects search --type contacts --filter "company=Acme Corp" \
-| jq -c '{id, properties: {company: "Acme Corporation"}}' \
-| hubspot objects update --type contacts
+# Lowercase emails (read, reshape, write)
+hubspot objects search --type contacts --filter "email" --properties email \
+| jq -c '{id, properties:{email: (.properties.email | ascii_downcase)}}' \
+| hubspot objects update --type contacts --dry-run
 ```
 
-### Audit All Contact Properties
+## 3. Dedupe with `hubspot objects merge`
+
+Secondary is folded into primary and deleted. **Irreversible.** Dry-run/digest/confirm gating applies.
 
 ```bash
-# Table format — useful for scanning property names and types
-hubspot properties list --object contacts --format table
-
-# JSONL — use when searching for a specific property by name or type
-hubspot properties list --object contacts
+# Single pair
+hubspot objects merge --type contacts --primary 149 --secondary 425 --dry-run
+hubspot objects merge --type contacts --primary 149 --secondary 425   # execute (≤100 pairs)
 ```
 
-### Create a Custom Data Quality Flag Property
+Bulk: pipe JSONL `{"primary":"...","secondary":"..."}` on stdin (omit `--primary`/`--secondary`).
+
+**Pagination required.** `objects search` caps at 100 rows per call and `jq -s` slurps a single stream into memory — running the snippet below against a raw `search` will silently miss every duplicate that crosses a page boundary. Collect the full set first with the pagination loop from `bulk-operations/SKILL.md` (write to `/tmp/contacts.jsonl`), then dedupe from the file:
 
 ```bash
-hubspot properties create \
-  --object contacts \
-  --name data_quality_flag \
-  --label "Data Quality Flag" \
-  --type string \
-  --field-type text
+# /tmp/contacts.jsonl produced by the pagination loop (bulk-operations/SKILL.md)
+jq -s -c '
+    group_by(.properties.email)[]
+    | select(length > 1)
+    | sort_by(.id | tonumber)
+    | .[0].id as $p | .[1:][] | {primary: $p, secondary: .id}
+  ' /tmp/contacts.jsonl \
+| hubspot objects merge --type contacts --dry-run | tee /tmp/merge-preview.jsonl
 ```
 
-### Flag Contacts Missing Critical Fields
+For >100 pairs, lift `digest` and `impact.records_affected` from the `BulkData` line and re-pipe the same producer with `--digest`/`--confirm` (see `bulk-operations`).
+
+## 4. Audit properties
+
+`hubspot properties list` (and `get`, `batch-read`) emits `{name, label, type, fieldType, groupName}` per row. Enum option values are not currently exposed by the CLI — read them off a real record (`hubspot objects search ... --properties <enum>`) or the HubSpot UI.
 
 ```bash
-# Create the flag property (once)
-hubspot properties create \
-  --object contacts \
-  --name missing_phone_flag \
-  --label "Missing Phone Flag" \
-  --type string \
-  --field-type text
+# Count properties per group (HubSpot groups standard fields; custom groups stand out)
+hubspot properties list --object contacts | jq -rs 'group_by(.groupName) | map({group: .[0].groupName, count: length}) | .[]'
 
-# Flag all contacts missing phone
-hubspot objects search --type contacts --filter "!phone" \
-| jq -c '{id, properties: {missing_phone_flag: "true"}}' \
-| hubspot objects update --type contacts
+# All enumeration properties
+hubspot properties list --object contacts | jq -c 'select(.type=="enumeration") | {name, label, fieldType}'
+
+# Create a DQ flag property, then set it via the normalize pattern in section 2
+hubspot properties create --object contacts --name dq_missing_phone --label "DQ: Missing Phone" --type string --field-type text
 ```
 
-### Find Contacts with a Specific Field Value (Exact Match)
+## Recovery
 
-```bash
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer" \
-  --properties email,firstname,lastname,hubspot_owner_id
-```
-
-### Find Contacts Matching a Partial Text Pattern
-
-Use `~` (CONTAINS_TOKEN) for partial string matches:
-
-```bash
-# Contacts with "acme" anywhere in their company field
-hubspot objects search --type contacts \
-  --filter "company~acme" \
-  --properties email,company
-```
-
-### Check If a Specific Contact's Data Is Complete
-
-```bash
-hubspot objects get --type contacts <id> \
-  --properties email,firstname,lastname,phone,company,lifecyclestage,hubspot_owner_id
-```
-
-## Known Limitations
-- No contact merge from the CLI. Use the HubSpot UI (Contacts → Actions → Merge) to deduplicate records.
-- `HAS_PROPERTY` across OR groups cannot be done in a single call. Run two separate searches and de-duplicate IDs client-side (collect both result sets and deduplicate on `id`).
-- For > 100 records, pagination is required. Use the pagination loop from the `bulk-operations` skill.
-- The `~` (CONTAINS_TOKEN) operator matches whole tokens (words), not arbitrary substrings. For full-text matching, use HubSpot UI search.
+Merge is irreversible. After any merge, `hubspot history --since 1h` captures the audit trail. If wrong direction, restore the secondary from the UI's recycle bin.

@@ -1,158 +1,98 @@
 ---
 name: workflow-automation
-description: List, inspect, create, update, and delete HubSpot workflows (automated flows) from the CLI, including duplicating a workflow as a template.
+description: List, inspect, create, update, and delete HubSpot workflows (v4 flows API) from the CLI.
 triggers:
-  - "create workflow"
-  - "automation"
   - "workflow"
+  - "automation"
   - "automated flow"
   - "enrollment trigger"
-  - "contact flow"
   - "find workflow by name"
   - "duplicate workflow"
   - "update workflow"
+  - "delete workflow"
 ---
 
 ## Resources
 
 | File | When to use |
 |---|---|
-| `resources/workflow-json-reference.md` | Structure of a workflow JSON object: all fields, action types, enrollment criteria, and the full-PUT update rule — read before editing or creating a workflow |
-| `resources/example-contact-flow.json` | Minimal valid CONTACT_FLOW template ready to pass to `hubspot workflows create --file` |
-| `resources/find-workflow-by-name.sh` | Script for finding a workflow by name substring since the API has no search endpoint |
+| `resources/workflow-json-reference.md` | Body shape for create/update — top-level fields, `enrollmentCriteria`, common action types, full-PUT pitfall |
+| `resources/example-contact-flow.json` | Minimal valid `CONTACT_FLOW` body for `hubspot workflows create --file` |
 
-## Context
-HubSpot workflows automate contact, deal, and company lifecycle actions. The CLI provides full CRUD for workflows, but search is not supported by the HubSpot API — finding a workflow by name requires listing all workflows and filtering the output locally. Updates are full replacements (PUT), so always fetch the current state before modifying.
+## Source of truth
 
-## Workflow Type Field Values
+`hubspot workflows --help` lists five subcommands: `list`, `get`, `create`, `update`, `delete`. There is **no `search`** — finding by name is `list | jq`. For JSONL piping, pagination, and destructive dry-run/digest/confirm patterns, this skill builds on `bulk-operations/SKILL.md` — re-read that first.
 
-| Type | Object |
-|---|---|
-| CONTACT_FLOW | Contact-based enrollment |
-| PLATFORM_FLOW | Company, deal, ticket, or other object-based enrollment |
-
-## Key Workflows
-
-### List All Workflows
+## 1. List + find by name
 
 ```bash
-# Table format — useful for scanning IDs and names
-hubspot workflows list --format table
+hubspot workflows list                       # JSONL: id, name, isEnabled, type, objectTypeId, revisionId
+hubspot workflows list --format table        # for human scanning
 
-# JSONL — use when filtering or processing workflow records
-hubspot workflows list
+# Find by name — case-insensitive substring
+hubspot workflows list | jq -c 'select(.name | test("Welcome"; "i"))'
 
-# With a limit
-hubspot workflows list --limit 50
+# Exact match
+hubspot workflows list | jq -c 'select(.name == "MQL Nurture")'
 ```
 
-### Find a Workflow by Name
+List is paginated at 100 per call. Loop with `--after` until `meta.next` is empty — see `bulk-operations/SKILL.md` "Pagination". See `resources/json-patterns.md` in `bulk-operations` for more `jq` filters.
 
-Workflow search is not supported by the API. List all workflows and filter by name from the output.
+## 2. Get + read shape
 
 ```bash
-# List all workflows and read the output to find by name
-hubspot workflows list
-
-# Filter with jq: case-insensitive name match
-hubspot workflows list \
-| jq -c 'select(.name | test("Welcome"; "i"))'
-
-# Filter with jq: exact name match
-hubspot workflows list \
-| jq -c 'select(.name == "MQL Nurture Sequence")'
-
-# Filter with jq: by type
-hubspot workflows list \
-| jq -c 'select(.type == "CONTACT_FLOW")'
+hubspot workflows get 12345678                            # one
+hubspot workflows get 12345678 87654321                   # batch positional
+printf '%s\n' 12345678 87654321 | hubspot workflows get   # batch stdin
+hubspot workflows get 12345678 > workflow.json            # save for editing
 ```
 
-### Inspect a Workflow's Full Structure
+Get returns the full body (`actions`, `enrollmentCriteria`, `revisionId`, …) — the shape required by create/update. See `resources/workflow-json-reference.md`.
+
+## 3. Create from JSON
 
 ```bash
-hubspot workflows get <flowId>
-
-# Save to file for editing
-hubspot workflows get <flowId> > workflow.json
-```
-
-### Duplicate a Workflow as a Template
-
-```bash
-# Step 1: get the source workflow
-hubspot workflows get 12345 > workflow.json
-
-# Step 2: edit workflow.json
-# - Change the "name" field to the new workflow name
-# - Update enrollment triggers as needed
-# - Read-only fields (createdAt, updatedAt, dataSources) are stripped automatically
-
-# Step 3: validate with dry-run
 hubspot workflows create --file workflow.json --dry-run
-
-# Step 4: create the new workflow
 hubspot workflows create --file workflow.json
+cat workflow.json | hubspot workflows create         # stdin also works
 ```
 
-### Create a New Workflow from a File
+Set `type` to `CONTACT_FLOW` or `PLATFORM_FLOW`; for `PLATFORM_FLOW` include `objectTypeId`. See `resources/workflow-json-reference.md` for the body shape, and `resources/example-contact-flow.json` for a minimal template. **Easiest path: `get` an existing similar workflow as a starting template** rather than hand-writing the JSON.
+
+## 4. Update — full PUT, get-modify-put round-trip
+
+Update is a **full replace**. The body must include `revisionId` (from `get`) and `type`. Read-only fields (`createdAt`, `updatedAt`, `dataSources`) are stripped automatically. Update is gated: dry-run first, then re-run with `--digest <hash> --confirm <flowId>`.
 
 ```bash
-hubspot workflows create --file new_workflow.json --dry-run
-hubspot workflows create --file new_workflow.json
+# 1. Fetch current state
+hubspot workflows get 12345678 > workflow.json
+
+# 2. Edit workflow.json (preserve revisionId, type, and any field you want to keep)
+
+# 3. Dry-run — emits a digest
+hubspot workflows update 12345678 --file workflow.json --dry-run
+
+# 4. Apply — confirm value is the flow id
+hubspot workflows update 12345678 --file workflow.json \
+  --digest blast-xxxxxxxx --confirm 12345678
 ```
 
-### Update a Workflow (Full Replacement)
+**Pitfall:** partial bodies silently clear fields. Sending only `actions` will wipe `enrollmentCriteria`. Always start from the full `get` response.
 
-Update is a full PUT — it replaces the entire workflow definition. Always get the current state first.
+## 5. Delete — destructive, link to bulk safety flow
 
 ```bash
-# Step 1: fetch current state
-hubspot workflows get 12345 > workflow.json
+# 1. Dry-run — emits a digest + the confirm hint
+hubspot workflows delete 12345678 --dry-run
 
-# Step 2: edit workflow.json as needed
-
-# Step 3: validate
-hubspot workflows update 12345 --file workflow.json --dry-run
-
-# Step 4: apply
-hubspot workflows update 12345 --file workflow.json
+# 2. Re-run with digest + confirm. Confirm value is the workflow's NAME, not its id.
+hubspot workflows delete 12345678 --digest blast-xxxxxxxx --confirm "New lead routing"
 ```
 
-### Delete a Workflow
+The dry-run output includes an `apply_command_hint` — copy the exact confirm string from there to avoid quoting surprises. Workflows cannot be restored through the automation API after deletion; check `hubspot history --since 1h` for an audit record. The full safety pattern (digest, 5-minute expiry, history recovery) is documented in `bulk-operations/SKILL.md` "Safe destructive workflow".
 
-```bash
-hubspot workflows delete 12345 --force
+## Known limitations
 
-# Dry-run to confirm which workflow would be deleted
-hubspot workflows delete 12345 --force --dry-run
-```
-
-### Audit All Workflows (Name, Type, Status)
-
-```bash
-hubspot workflows list \
-| jq -r '[.id, .name, .type, .isEnabled] | @tsv' \
-| column -t
-```
-
-### Find Enabled vs. Disabled Workflows
-
-```bash
-# Enabled workflows
-hubspot workflows list | jq -c 'select(.isEnabled == true)'
-
-# Disabled workflows
-hubspot workflows list | jq -c 'select(.isEnabled == false)'
-```
-
-## Key Rules
-- **No workflow search endpoint** — `hubspot workflows search` does not exist. The HubSpot API has no search for workflows. Always use `hubspot workflows list` and filter the output by name. This also means `hubspot objects search --type workflows` will not work.
-- **Update is a full PUT** — partial patching is not supported. Always `get` the workflow first, modify the JSON, then `update`.
-- **Read-only fields** (`createdAt`, `updatedAt`, `dataSources`) are stripped automatically on create and update. You do not need to remove them manually.
-- **Always `--dry-run`** before creating or updating workflows in production.
-
-## Known Limitations
-- No workflow search endpoint — the HubSpot API does not support searching workflows by name or property. Use `hubspot workflows list` and filter the output locally to find workflows by name.
-- No Lists API in the CLI — you cannot create list-based enrollment triggers from the CLI. Configure list enrollment triggers in the HubSpot UI after creating the workflow.
-- No sequences/cadences API.
-- Workflow enrollment criteria and action definitions are complex nested JSON. Use `hubspot workflows get` on an existing similar workflow as a starting template rather than writing the JSON from scratch.
+- No `hubspot workflows search` — `list | jq` is the workaround.
+- No Lists API in the CLI — list-membership enrollment triggers must be wired up in the UI.
+- No sequences/cadences API. `dataSources` is read-only — cannot be rewired via update.

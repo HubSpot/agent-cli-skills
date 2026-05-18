@@ -10,11 +10,13 @@ This document describes the structure of a HubSpot workflow (automation flow) JS
 |---|---|---|---|
 | `id` | string | **read-only** | Workflow ID assigned by HubSpot |
 | `name` | string | yes | Display name of the workflow |
-| `type` | string | yes | `CONTACT_FLOW` or `PLATFORM_FLOW` (see below) |
-| `enabled` | boolean | yes | `true` to activate; use `false` for drafts and templates |
-| `createdAt` | string | **read-only** | ISO 8601 timestamp; stripped automatically on create/update |
-| `updatedAt` | string | **read-only** | ISO 8601 timestamp; stripped automatically on create/update |
-| `revisionId` | string | **read-only** | Included in every `get` response |
+| `type` | string | yes | `CONTACT_FLOW` (contacts) or `PLATFORM_FLOW` (deal, company, ticket, custom object) |
+| `isEnabled` | boolean | yes | `true` activates the workflow; `false` for drafts and templates |
+| `objectTypeId` | string | yes | Object type the flow enrolls (e.g. `0-1` contacts, `0-2` companies, `0-3` deals). Required for `PLATFORM_FLOW` |
+| `revisionId` | string | required on update | Returned by `get`; the API uses it for optimistic concurrency on PUT |
+| `createdAt` | string | **read-only** | Stripped before request on create/update |
+| `updatedAt` | string | **read-only** | Stripped before request on create/update |
+| `dataSources` | array | **read-only** | Stripped before request on create/update |
 | `enrollmentCriteria` | object | yes | Defines which contacts/records enroll (see below) |
 | `actions` | array | yes | Ordered list of actions the workflow executes (see below) |
 | `suppressionListIds` | array | yes | List IDs whose members are excluded from enrollment |

@@ -1,198 +1,117 @@
 ---
 name: audience-targeting
-description: Build targeted contact segments for campaigns by filtering on lifecycle stage, engagement, firmographics, and geography, then exporting results as JSONL.
+description: Build a targeted contact segment by filtering on lifecycle, engagement, jobtitle, geography, or firmographics — then export it as JSONL for a campaign or downstream tool.
 triggers:
   - "segment contacts"
   - "target audience"
   - "find prospects"
-  - "filter contacts by industry"
-  - "export contact list"
   - "build audience"
   - "contact segmentation"
-  - "find contacts in"
+  - "contacts in industry"
+  - "decision makers"
+  - "engaged contacts"
 ---
 
-## Resources
+## Foundation
 
-| File | When to use |
-|---|---|
-| `resources/contact-segmentation-filters.md` | Ready-to-run filter expressions organized by use case: lifecycle stage, lead status, email engagement, activity recency, deal association, and OR group examples |
-| `resources/industry-values.md` | Complete `industry` enum value list for Company objects, plus the two-step pattern for targeting contacts by their associated company's industry |
+Read `bulk-operations/SKILL.md` first — pagination, JSONL piping, destructive-op safety. Reshape recipes in `bulk-operations/resources/json-patterns.md`. Resource: `resources/contact-segmentation-filters.md` is the filter-expression cookbook (lifecycle, lead status, email engagement, activity, deals, owner).
 
-## Context
-Precise audience targeting starts with accurate segmentation. This skill covers filtering contacts and companies on behavioral, demographic, and firmographic properties, composing OR and AND logic, and exporting results for use in campaigns or downstream tools. Note that industry lives on Company objects, so cross-object targeting requires two steps.
+## Filter syntax cheat sheet
 
-## Property Reference — Contacts
+Source of truth: `hubspot objects search --help`.
 
-| Property | Type | Notes |
-|---|---|---|
-| lifecyclestage | enumeration | subscriber, lead, marketingqualifiedlead, salesqualifiedlead, opportunity, customer, evangelist, other |
-| hs_persona | enumeration | Portal-specific — check `hubspot properties list --object contacts` for valid values |
-| jobtitle | string | |
-| city | string | |
-| state | string | |
-| country | string | |
-| hs_language | string | ISO language code |
-| hs_email_optout | boolean | true if opted out of all marketing email |
-| hs_email_last_open_date | datetime | Last marketing email open — format YYYY-MM-DD for filters |
-| num_associated_deals | number | Read-only |
+- One `--filter` flag = one AND group: `--filter "lifecyclestage=lead AND !hubspot_owner_id"`.
+- Multiple `--filter` flags are OR'd. Use for enum-OR-enum.
+- Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `~` (CONTAINS_TOKEN — whole-word, NOT substring).
+- HAS_PROPERTY: bare `name` or `name?`. NOT_HAS_PROPERTY: `!name`. Dates: `YYYY-MM-DD`.
 
-## Property Reference — Companies
+`~` gotcha: `jobtitle~director` matches the token "director", not arbitrary substrings. No regex operator — search broadly, post-filter with `jq`.
 
-| Property | Type | Notes |
-|---|---|---|
-| industry | enumeration | See `resources/industry-values.md` for all 36 values |
-| numberofemployees | number | |
-| annualrevenue | number | |
-| type | enumeration | PROSPECT, PARTNER, RESELLER, VENDOR, OTHER |
-| city | string | |
-| country | string | |
+## Properties this skill turns on
 
-## Key Workflows
+Full live list: `hubspot properties list --object contacts`. Enum options aren't exposed by `properties get`; discover with `hubspot objects list --type contacts --properties <name> --limit 100 --format json | jq -r '.data[].properties.<name> // empty' | sort -u`.
 
-### Find Leads in a Specific Lifecycle Stage
+Core fields used here: `lifecyclestage`, `hubspot_owner_id` (bare/`!` for owned/unowned; `hubspot owners list` for IDs), `hs_email_optout` (`!=true` excludes opted-out), `hs_email_last_open_date` / `notes_last_contacted` (recency), `jobtitle` / `country` / `city` (string `=` or `~`), `num_associated_deals` (0 net-new, `>=1` has-pipeline).
+
+Firmographics (`industry`, `numberofemployees`, `annualrevenue`) live on **companies** — see cross-object section.
+
+## Common segments
 
 ```bash
+# Recent leads (this quarter, not yet owned)
 hubspot objects search --type contacts \
-  --filter "lifecyclestage=lead" \
-  --properties email,firstname,lastname,lifecyclestage
-```
+  --filter "lifecyclestage=lead AND createdate>2026-01-01 AND !hubspot_owner_id" \
+  --properties email,firstname,lastname,createdate
 
-### Combine Conditions with AND
-
-```bash
-# MQLs that are not yet owned by anyone
+# Decision-makers by jobtitle (OR across tokens)
 hubspot objects search --type contacts \
-  --filter "lifecyclestage=marketingqualifiedlead AND !hubspot_owner_id" \
-  --properties email,firstname,lastname
-```
+  --filter "jobtitle~director" --filter "jobtitle~vp" --filter "jobtitle~chief" \
+  --properties email,jobtitle,company
 
-### OR Logic with Multiple --filter Flags
-
-Each `--filter` flag is a separate OR group. Records matching any group are returned.
-
-```bash
-# Contacts in tech OR software companies (CONTAINS_TOKEN)
+# Engaged but not yet MQL (opened recently, still lead, opted in)
 hubspot objects search --type contacts \
-  --filter "company~tech" \
-  --filter "company~software" \
-  --properties email,company
-
-# Contacts who are leads OR MQLs
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=lead" \
-  --filter "lifecyclestage=marketingqualifiedlead" \
-  --properties email,lifecyclestage
-```
-
-### Find Unengaged Contacts (No Recent Email Open)
-
-```bash
-hubspot objects search --type contacts \
-  --filter "hs_email_last_open_date<2024-01-01" \
+  --filter "lifecyclestage=lead AND hs_email_last_open_date>2026-04-01 AND hs_email_optout!=true" \
   --properties email,firstname,hs_email_last_open_date
-```
 
-### Find Opted-In Contacts Only
-
-```bash
-# Contacts who have NOT opted out
+# Geographic — US contacts opted in
 hubspot objects search --type contacts \
-  --filter "hs_email_optout!=true" \
-  --properties email,firstname,lastname
+  --filter "country=United States AND hs_email_optout!=true" \
+  --properties email,state,city
 ```
 
-### Export a Targeted List to File
+More patterns (lead status, deals, owners, combined AND/OR) in `resources/contact-segmentation-filters.md`.
+
+## Cross-object: companies-in-industry → their contacts
+
+`industry`/`numberofemployees`/`annualrevenue` live on the company. Build the company set, then traverse — never `xargs -I{} hubspot objects get` per company. `associations list` emits `{"id":"...","type":"company_to_contact"}`, feeding directly into a single batched `objects get`.
 
 ```bash
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=lead" \
-  --properties email,firstname,lastname,jobtitle \
-  > leads.jsonl
-
-# Convert to CSV (example using jq — agent can construct CSV directly from the JSONL)
-cat leads.jsonl | jq -r '[.properties.email, .properties.firstname, .properties.lastname, .properties.jobtitle] | @csv'
-```
-
-### Target by Company Size — Two-Step Cross-Object Query
-
-Industry and company size live on Company objects, not Contact objects. To target contacts at large companies:
-
-```bash
-# Step 1: find matching companies
+# Step 1: target companies. Industry options are portal-specific — discover with:
+#   hubspot objects list --type companies --properties industry --limit 100 --format json \
+#   | jq -r '.data[].properties.industry // empty' | sort -u
 hubspot objects search --type companies \
-  --filter "numberofemployees>=500" \
-  > large_companies.jsonl
-
-# Step 2: get associated contacts for each company
-cat large_companies.jsonl \
-| jq -r '.id' \
-| xargs -I{} hubspot associations list --from companies:{} --to contacts --format jsonl \
-> target_contacts.jsonl
-```
-
-### Target by Industry (Two-Step)
-
-```bash
-# Step 1: find companies in target industries
-hubspot objects search --type companies \
-  --filter "industry=INFORMATION_TECHNOLOGY" \
-  --filter "industry=SOFTWARE" \
-  > tech_companies.jsonl
-
-# Step 2: get their contacts
-cat tech_companies.jsonl \
-| jq -r '.id' \
-| xargs -I{} hubspot associations list --from companies:{} --to contacts --format jsonl
-```
-
-### Combined Cross-Object Targeting for Email Campaigns
-
-Industry and employee count live on Company objects. To build a contact audience from firmographic criteria, always query companies first then traverse to contacts, then filter out opted-out contacts.
-
-```bash
-# Step 1: find matching companies (industry + size)
-hubspot objects search --type companies \
-  --filter "industry=INFORMATION_TECHNOLOGY AND numberofemployees>=500" \
-  --filter "industry=SOFTWARE AND numberofemployees>=500" \
+  --filter "industry=SOFTWARE AND numberofemployees>=100" \
   --properties name,industry,numberofemployees \
   > target_companies.jsonl
 
-# Step 2: collect contacts from those companies via association traversal
-cat target_companies.jsonl \
-| jq -r '.id' \
-| xargs -I{} hubspot associations list --from companies:{} --to contacts --format jsonl \
-| jq -r '.id' \
-| sort -u \
-> candidate_contact_ids.txt
+# Step 2: gather association IDs (associations list has no batch --from), then ONE batched
+# objects get for all contacts.
+while read -r cid; do hubspot associations list --from "companies:$cid" --to contacts; done \
+  < <(jq -r '.id' target_companies.jsonl) \
+| jq -c '{id}' | sort -u \
+| hubspot objects get --type contacts --properties email,firstname,jobtitle,hs_email_optout \
+> target_contacts.jsonl
 
-# Step 3: fetch contact records and exclude opted-out contacts
-# (run per contact ID or re-query with the owner/lifecycle filters you need)
-hubspot objects search --type contacts \
-  --filter "hs_email_optout!=true" \
-  --properties email,firstname,lastname,lifecyclestage
+# Optional: drop opted-out
+jq -c 'select(.properties.hs_email_optout != "true")' target_contacts.jsonl > campaign_audience.jsonl
 ```
 
-For the full list of `industry` enum values (e.g., `INFORMATION_TECHNOLOGY`, `SOFTWARE`, `FINANCIAL_SERVICES`), see `resources/industry-values.md`.
+## Saving and reusing a segment
 
-### Filter by Location
+A segment is a JSONL file. Re-use for updates, exports, or re-fetches:
 
 ```bash
-# Contacts in a specific country
+# Save
 hubspot objects search --type contacts \
-  --filter "country=United States" \
-  --properties email,firstname,state,city
+  --filter "lifecyclestage=lead AND hs_email_optout!=true" \
+  --properties email,firstname,lastname,jobtitle \
+  > segments/opted_in_leads.jsonl
 
-# Companies in a specific city
-hubspot objects search --type companies \
-  --filter "city=San Francisco" \
-  --properties name,industry,numberofemployees
+# Assign owner (dry-run first per bulk-operations/SKILL.md)
+jq -c '{id, properties:{hubspot_owner_id:"12345"}}' segments/opted_in_leads.jsonl \
+| hubspot objects update --type contacts --dry-run
+
+# Re-fetch with different properties later
+jq -c '{id}' segments/opted_in_leads.jsonl \
+| hubspot objects get --type contacts --properties email,lifecyclestage,hs_lead_status
 ```
 
-## Known Limitations
-- No Lists API in the CLI. You cannot save a search as a HubSpot list or use list membership as a filter condition. Use the HubSpot UI to create and manage lists.
-- Industry lives on Company objects, not Contact objects. Cross-object targeting always requires a two-step query (companies → associations → contacts).
-- For > 100 results, use the pagination loop from the `bulk-operations` skill.
-- OR logic requires separate `--filter` flags — one condition group per flag. You cannot use OR inside a single `--filter` expression.
-- The `~` (CONTAINS_TOKEN) operator matches whole words/tokens, not arbitrary substrings.
-- `hs_email_optout` filter values: use `!=true` to find opted-in contacts, or `=true` to find opted-out contacts.
+Destructive ops on a saved segment follow the dry-run → digest → confirm flow in `bulk-operations/SKILL.md`.
+
+## Known limits
+
+- No Lists API surface. Can't save as a HubSpot list or filter by list membership.
+- `~` is token-match, not substring. No regex operator.
+- `properties get` does not return enum options — discover via `objects list` + `jq`.
+- `associations list` has no batch `--from`. Loop to gather IDs, batch the downstream `objects get`.
+- For >100 results, use the pagination loop in `bulk-operations/SKILL.md`.

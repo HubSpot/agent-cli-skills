@@ -1,7 +1,7 @@
 {
   "name": "Example Contact Flow — Set Lead Status on Lead Enrollment",
   "type": "CONTACT_FLOW",
-  "enabled": false,
+  "isEnabled": false,
   "enrollmentCriteria": {
     "filterGroups": [
       {

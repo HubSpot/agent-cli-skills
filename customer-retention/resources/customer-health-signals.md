@@ -1,216 +1,100 @@
-# Customer Health Signals
+# Customer Health Signals — Filter Cookbook
 
-CRM properties and CLI filter expressions organized by churn risk tier. Run these queries to build a retention watchlist.
+Churn-risk filter expressions organized by tier. Drop these into `hubspot objects search --filter "..."`. Verify every property/enum in your portal first via `hubspot properties get --object <type> <name>` — the SKILL.md "Verify properties" step is mandatory.
 
----
-
-## Tier 1 — Strong Churn Signals (Check These First)
-
-### Subscription past due or cancelled
+Date macros below work on both macOS and Linux:
 
 ```bash
-# Past due subscriptions — revenue at immediate risk
-hubspot objects search --type subscriptions \
-  --filter "hs_subscription_status=PAST_DUE" \
-  --properties hs_mrr,hs_arr,hs_subscription_status
-
-# Cancelled subscriptions — candidates for win-back outreach
-hubspot objects search --type subscriptions \
-  --filter "hs_subscription_status=CANCELLED" \
-  --properties hs_mrr,hs_subscription_status
+CUTOFF_60=$(date -v-60d +%Y-%m-%d 2>/dev/null || date -d '60 days ago' +%Y-%m-%d)
+CUTOFF_30=$(date -v-30d +%Y-%m-%d 2>/dev/null || date -d '30 days ago' +%Y-%m-%d)
+CUTOFF_7=$(date -v-7d  +%Y-%m-%d 2>/dev/null || date -d '7 days ago'  +%Y-%m-%d)
 ```
 
-**Property:** `hs_subscription_status`
-**Values:** `ACTIVE` `CANCELLED` `PAST_DUE` `TRIALING`
-
 ---
+
+## Tier 1 — Strong churn signals
 
 ### No outreach in 60+ days
 
-`notes_last_contacted` is updated whenever a call, note, or meeting is logged and associated to the contact.
+`notes_last_contacted` updates whenever a call/note/meeting is logged and associated to the contact.
 
 ```bash
-# macOS
 hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND notes_last_contacted<$(date -v-60d +%Y-%m-%d)" \
-  --properties email,firstname,lastname,notes_last_contacted,hubspot_owner_id
+  --filter "lifecyclestage=customer AND notes_last_contacted<$CUTOFF_60" \
+  --properties email,firstname,notes_last_contacted,hubspot_owner_id
 
-# Linux
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND notes_last_contacted<$(date -d '60 days ago' +%Y-%m-%d)" \
-  --properties email,firstname,lastname,notes_last_contacted,hubspot_owner_id
-
-# Customers who have NEVER been contacted
+# Never contacted
 hubspot objects search --type contacts \
   --filter "lifecyclestage=customer AND !notes_last_contacted" \
-  --properties email,firstname,lastname,hubspot_owner_id
+  --properties email,firstname,hubspot_owner_id
 ```
 
-**Property:** `notes_last_contacted` (datetime)
+### Subscription past-due / cancelled
 
----
+`hs_subscription_status` enum is portal-specific — run `hubspot properties get --object subscriptions hs_subscription_status` and substitute the exact value. Requires the `subscriptions-read` scope on your token.
+
+```bash
+hubspot objects search --type subscriptions \
+  --filter "hs_subscription_status=past_due" \
+  --properties hs_recurring_billing_total,hs_subscription_status
+
+hubspot objects search --type subscriptions \
+  --filter "hs_subscription_status=cancelled" \
+  --properties hs_recurring_billing_total,hs_subscription_status
+```
 
 ### High-priority open tickets older than 7 days
 
-Requires knowing your ticket pipeline stage ID for open/in-progress stages.
+`hs_ticket_priority` enum: `LOW` / `MEDIUM` / `HIGH` / `URGENT` (verify in your portal). Multiple `--filter` flags are OR'd:
 
 ```bash
-# macOS
 hubspot objects search --type tickets \
-  --filter "hs_ticket_priority=URGENT AND createdate<$(date -v-7d +%Y-%m-%d)" \
-  --properties subject,hs_ticket_priority,createdate,hubspot_owner_id
-
-hubspot objects search --type tickets \
-  --filter "hs_ticket_priority=HIGH AND createdate<$(date -v-7d +%Y-%m-%d)" \
-  --properties subject,hs_ticket_priority,createdate,hubspot_owner_id
-
-# Linux
-hubspot objects search --type tickets \
-  --filter "hs_ticket_priority=URGENT AND createdate<$(date -d '7 days ago' +%Y-%m-%d)" \
+  --filter "hs_ticket_priority=URGENT AND createdate<$CUTOFF_7" \
+  --filter "hs_ticket_priority=HIGH AND createdate<$CUTOFF_7" \
   --properties subject,hs_ticket_priority,createdate,hubspot_owner_id
 ```
 
-**Property:** `hs_ticket_priority` — values: `LOW` `MEDIUM` `HIGH` `URGENT`
-
----
-
-### Customer opted out of all email
+### Contact opted out of all email
 
 ```bash
 hubspot objects search --type contacts \
   --filter "lifecyclestage=customer AND hs_email_optout=true" \
-  --properties email,firstname,lastname,hs_email_optout,hubspot_owner_id
+  --properties email,firstname,hubspot_owner_id
 ```
-
-**Property:** `hs_email_optout` (boolean) — `true` means the contact has unsubscribed from all marketing email. This is a strong disengagement signal.
 
 ---
 
-## Tier 2 — Moderate Risk Signals
+## Tier 2 — Moderate risk
 
 ### No sales activity in 30 days
 
 ```bash
-# macOS
 hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND hs_last_sales_activity_date<$(date -v-30d +%Y-%m-%d) AND hs_email_optout!=true" \
-  --properties email,firstname,lastname,hs_last_sales_activity_date,hubspot_owner_id
-
-# Linux
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND hs_last_sales_activity_date<$(date -d '30 days ago' +%Y-%m-%d) AND hs_email_optout!=true" \
-  --properties email,firstname,lastname,hs_last_sales_activity_date,hubspot_owner_id
+  --filter "lifecyclestage=customer AND hs_last_sales_activity_date<$CUTOFF_30 AND hs_email_optout!=true" \
+  --properties email,firstname,hs_last_sales_activity_date,hubspot_owner_id
 ```
-
-**Property:** `hs_last_sales_activity_date` (read-only datetime)
-
----
 
 ### No email engagement in 45 days
 
 ```bash
-# macOS
+CUTOFF_45=$(date -v-45d +%Y-%m-%d 2>/dev/null || date -d '45 days ago' +%Y-%m-%d)
 hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND hs_email_last_open_date<$(date -v-45d +%Y-%m-%d) AND hs_email_optout!=true" \
-  --properties email,firstname,hs_email_last_open_date,hubspot_owner_id
-
-# Linux
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND hs_email_last_open_date<$(date -d '45 days ago' +%Y-%m-%d) AND hs_email_optout!=true" \
-  --properties email,firstname,hs_email_last_open_date,hubspot_owner_id
+  --filter "lifecyclestage=customer AND hs_email_last_open_date<$CUTOFF_45 AND hs_email_optout!=true" \
+  --properties email,firstname,hs_email_last_open_date
 ```
 
-**Property:** `hs_email_last_open_date` (datetime)
+### Company with no open deals
 
----
-
-### Company with no active deals in the pipeline
-
-`num_associated_deals` on a company counts all associated deals. A value of 0 means no open pipeline — the account has no expansion or renewal in motion.
+`hs_num_open_deals` is a read-only rollup. Zero = no expansion or renewal in motion.
 
 ```bash
 hubspot objects search --type companies \
-  --filter "num_associated_deals<1" \
+  --filter "hs_num_open_deals=0" \
   --properties name,annualrevenue,hs_last_sales_activity_date,hs_num_associated_contacts
 ```
 
-**Property:** `num_associated_deals` (read-only number) — counts all associated deals; `<1` finds companies with nothing in the pipeline.
-
 ---
 
-### No calls or notes logged in 30 days
+## Combining signals
 
-Run a combined query on `notes_last_contacted` as a proxy for logged activity:
-
-```bash
-# macOS
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND notes_last_updated<$(date -v-30d +%Y-%m-%d)" \
-  --properties email,firstname,notes_last_contacted,notes_last_updated,hubspot_owner_id
-
-# Linux
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND notes_last_updated<$(date -d '30 days ago' +%Y-%m-%d)" \
-  --properties email,firstname,notes_last_contacted,notes_last_updated,hubspot_owner_id
-```
-
-**Properties:** `notes_last_contacted`, `notes_last_updated`
-
----
-
-## Tier 3 — Engagement Indicators (Positive)
-
-These indicate an active, healthy customer relationship.
-
-### Recent email engagement (within 14 days)
-
-```bash
-# macOS
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND hs_email_last_open_date>$(date -v-14d +%Y-%m-%d)" \
-  --properties email,firstname,hs_email_last_open_date
-
-# Linux
-hubspot objects search --type contacts \
-  --filter "lifecyclestage=customer AND hs_email_last_open_date>$(date -d '14 days ago' +%Y-%m-%d)" \
-  --properties email,firstname,hs_email_last_open_date
-```
-
-### Open deals with high probability
-
-```bash
-hubspot objects search --type deals \
-  --filter "hs_deal_stage_probability>70 AND hs_is_closed!=true" \
-  --properties dealname,hs_deal_stage_probability,amount,closedate,hubspot_owner_id
-```
-
-### Recent calls or meetings logged
-
-Check via associations — get all calls for a contact logged after a date:
-
-```bash
-hubspot associations list --from contacts:<contact_id> --to calls --format jsonl \
-| jq -r '.id' \
-| xargs -I{} hubspot objects get --type calls {} \
-    --properties hs_call_title,hs_call_status,hs_timestamp
-```
-
----
-
-## Dynamic Date Snippets
-
-```bash
-# macOS
-DAYS_60_AGO=$(date -v-60d +%Y-%m-%d)
-DAYS_30_AGO=$(date -v-30d +%Y-%m-%d)
-DAYS_45_AGO=$(date -v-45d +%Y-%m-%d)
-DAYS_14_AGO=$(date -v-14d +%Y-%m-%d)
-DAYS_7_AGO=$(date -v-7d +%Y-%m-%d)
-
-# Linux
-DAYS_60_AGO=$(date -d '60 days ago' +%Y-%m-%d)
-DAYS_30_AGO=$(date -d '30 days ago' +%Y-%m-%d)
-DAYS_45_AGO=$(date -d '45 days ago' +%Y-%m-%d)
-DAYS_14_AGO=$(date -d '14 days ago' +%Y-%m-%d)
-DAYS_7_AGO=$(date -d '7 days ago' +%Y-%m-%d)
-```
+Use multiple `--filter` flags (OR'd) to build a single watchlist of any-of matches, or chain conditions inside one `--filter` with `AND` for must-all-match. Pipe the unioned output through `jq 'unique_by(.id)'` if you want to dedupe before downstream task creation.

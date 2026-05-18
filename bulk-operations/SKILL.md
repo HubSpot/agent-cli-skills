@@ -1,188 +1,178 @@
 ---
 name: bulk-operations
-description: Foundational skill for bulk CRM operations using the JSONL pipe pattern — read from any list or search and pipe directly into create, update, or delete commands.
+description: Foundation patterns for the `hubspot` CLI — JSONL piping, batch read, pagination, dry-run/digest/confirm for destructive ops, and `hubspot history` for recovery. Every other skill builds on this one.
 triggers:
-  - "bulk update contacts"
-  - "pipe records"
+  - "bulk update"
+  - "bulk create"
+  - "bulk delete"
   - "process in bulk"
-  - "batch import"
-  - "JSONL"
-  - "bulk operations"
-  - "pipe output to update"
+  - "JSONL pipe"
+  - "pagination"
+  - "dry-run"
+  - "history"
+  - "undo"
 ---
 
 ## Resources
 
 | File | When to use |
 |---|---|
-| `resources/pagination-loop.sh` | Pagination loop for fetching more than 100 records using the `--after` cursor — adapt for any object type |
-| `resources/json-patterns.md` | Transformation patterns for extracting fields, building create/update payloads, de-duplicating results, and building association JSONL |
+| `resources/json-patterns.md` | Reshape patterns for turning a read into an update payload, a search into a delete list, a CSV into an upsert stream. |
 
-## Context
-The `hubspot` CLI outputs JSONL (one JSON object per line) by default, making every read command pipeable into every write command. This skill covers the foundational patterns for bulk data operations: pagination, JSON transformation, rate limit management, and safe bulk mutation workflows.
+## Source of truth
 
-## How to Process JSONL
+`hubspot <command> --help` is authoritative. If anything in this file contradicts `--help`, trust `--help` and tell the user. Run `hubspot objects types` once at the start of a session to see what object types exist in this portal (standard + custom).
 
-The CLI outputs JSONL — one JSON object per line. Every read command can pipe directly into every write command; the transformation step reshapes each record into the mutation input shape.
+## Output shape
 
-**Two-file pattern** — read output to a file, construct the payload file, then run the mutation:
-```bash
-hubspot objects search --type contacts --filter "lifecyclestage=lead" > /tmp/leads.jsonl
-# Construct /tmp/updates.jsonl: each line is {"id":"...","properties":{"lifecyclestage":"marketingqualifiedlead"}}
-hubspot objects update --type contacts < /tmp/updates.jsonl
-```
+Every read command (`list`, `search`, `get`) emits JSONL — one JSON object per line:
 
-**Pipe pattern** — transform each JSONL line inline and pipe directly to the write command:
-```bash
-hubspot objects search --type contacts --filter "lifecyclestage=lead" \
-| <transform each line to {"id":"...","properties":{"lifecyclestage":"marketingqualifiedlead"}}> \
-| hubspot objects update --type contacts
-```
-
-## Key Concepts
-
-**Output shape (default JSONL):**
-Each record from `list`, `search`, or `get` is one line:
 ```json
-{"id":"123","properties":{"email":"user@example.com","firstname":"Jane"}}
+{"id":"123","properties":{"email":"jane@example.com","firstname":"Jane"},"createdAt":"...","updatedAt":"...","archived":false,"url":"..."}
 ```
-Properties are nested under the `properties` key.
 
-**Mutation input shape (stdin JSONL):**
-- `update`: `{"id":"123","properties":{"field":"value"}}`
-- `delete`: `{"id":"123"}`
-- `create`: `{"properties":{"field":"value"}}`
-- `associations create`: `{"from":"contacts:123","to":"companies:456"}`
+`--properties email,firstname` limits which fields the server returns under `.properties` — it does **not** flatten the shape (despite what `hubspot objects get --help` currently claims; that's CLI improvement #11). Downstream `jq` should use `.properties.email`, not `.prop_email`.
 
-## Key Workflows
+Write commands (`create`, `update`, `upsert`, `delete`, `merge`, `associations create`) accept JSONL on stdin and emit JSONL — one result per input line: `{"id":"123","ok":true,"data":{...}}` or `{"id":"123","ok":false,"error":{"status":...,"message":"..."}}`. Order of results matches input order.
 
-### Safe Bulk Mutation Pattern
+## Read in batch — never one-by-one
 
-Always `--dry-run` first. Dry-run output has the same shape but includes `"dry_run":true,"executed":false`.
+The CLI accepts multiple IDs natively. **Never** pipe IDs into `xargs -I{} hubspot objects get ...` — that spawns one CLI process per record.
 
 ```bash
-# Step 1: preview what will change
-hubspot objects search --type contacts --filter "lifecyclestage=lead" \
-| jq -c '{id, properties: {lifecyclestage: "marketingqualifiedlead"}}' \
-| hubspot objects update --type contacts --dry-run
+# Positional args (small, known list)
+hubspot objects get --type contacts 12345 67890 23456 --properties email,firstname
 
-# Step 2: test on a small subset
-hubspot objects search --type contacts --filter "lifecyclestage=lead" \
-| head -n 10 \
-| jq -c '{id, properties: {lifecyclestage: "marketingqualifiedlead"}}' \
-| hubspot objects update --type contacts --dry-run
+# Stdin from another command — one CLI call total
+hubspot associations list --from companies:67890 --to contacts \
+| jq -c '{id}' \
+| hubspot objects get --type contacts --properties email,firstname,jobtitle
 
-# Step 3: run for real
-hubspot objects search --type contacts --filter "lifecyclestage=lead" \
-| jq -c '{id, properties: {lifecyclestage: "marketingqualifiedlead"}}' \
-| hubspot objects update --type contacts
+# Bare IDs on stdin also work
+printf '12345\n67890\n23456\n' | hubspot objects get --type contacts --properties email
 ```
 
-### Pagination Loop (> 100 Records)
+A single `hubspot objects get` reads up to ~100 IDs per call via the batch endpoint. For more, page in chunks of 100.
 
-The CLI does not auto-paginate. Use `--format json` to get the `meta.next` cursor for the next page:
+## Pagination
+
+`list` and `search` return at most 100 records per call. Use `--format json` to get the cursor under `meta.next`, then re-run with `--after <cursor>` until the cursor is empty.
 
 ```bash
 after=""
-while true; do
+while :; do
   if [ -z "$after" ]; then
-    result=$(hubspot objects list --type contacts --limit 100 --format json)
+    page=$(hubspot objects search --type contacts --filter "lifecyclestage=lead" --limit 100 --format json)
   else
-    result=$(hubspot objects list --type contacts --limit 100 --after "$after" --format json)
+    page=$(hubspot objects search --type contacts --filter "lifecyclestage=lead" --limit 100 --after "$after" --format json)
   fi
-
-  # Extract records: .data[] contains the JSONL records
-  echo "$result" | jq -c '.data[]' >> all_contacts.jsonl
-
-  # Get next cursor: .meta.next is empty string when no more pages
-  next=$(echo "$result" | jq -r '.meta.next // empty')
-  if [ -z "$next" ]; then
-    break
-  fi
-  after="$next"
+  echo "$page" | jq -c '.data[]' >> /tmp/leads.jsonl
+  after=$(echo "$page" | jq -r '.meta.next // empty')
+  [ -z "$after" ] && break
 done
 ```
 
-Run the first page, read `meta.next` from the JSON output, then run subsequent pages with `--after <cursor>` until `meta.next` is absent or empty.
+Same loop works for `list`. See `CLI_IMPROVEMENTS.md` #2 — auto-pagination is on the ask list.
 
-The same pattern works for `search` with `--format json`.
+## Write in batch — always pipe
 
-### JSON Transformation Patterns
+Write commands accept JSONL on stdin. The transformation between a read shape and a write shape is a `jq` reshape:
 
-The transformation step between a read command and a write command reshapes each JSONL record. The `jq` examples below show the transformation logic — agents apply the same logic natively.
+| Write command | Required per-line shape |
+|---|---|
+| `objects create` | `{"properties":{"field":"value"}}` |
+| `objects update` | `{"id":"123","properties":{"field":"value"}}` |
+| `objects upsert` | `{"idProperty":"email","id":"jane@example.com","properties":{...}}` (or use `--id-property email` once) |
+| `objects delete` | `{"id":"123"}` |
+| `objects merge` | `{"primary":"123","secondary":"456"}` |
+| `associations create` | `{"from":"contacts:123","to":"companies:456"}` |
 
-```bash
-# Extract a single field from each record
-hubspot objects list --type contacts | jq -r '.properties.email'
+Use **plural** object names in `from`/`to` (`contacts:`, not `contact:`).
 
-# Transform read output into update payload
-hubspot objects search --type contacts --filter "company=Acme Corp" \
-| jq -c '{id, properties: {company: "Acme Corporation"}}'
+## Safe destructive workflow
 
-# Filter records before piping to mutation
-hubspot objects list --type contacts \
-| jq -c 'select(.properties.email != null and .properties.email != "")' \
-| jq -c '{id, properties: {email: .properties.email}}'
+Every destructive op (`delete`, `merge`, bulk `update`) supports `--dry-run`. The gating depends on row count:
 
-# Build create payloads from an external JSONL file
-cat import.jsonl \
-| jq -c '{properties: {email: .email, firstname: .first_name, lastname: .last_name}}'
-
-# De-duplicate IDs from two search results
-(hubspot objects search --type contacts --filter "lifecyclestage=lead"; \
- hubspot objects search --type contacts --filter "lifecyclestage=marketingqualifiedlead") \
-| jq -s 'map(.id) | unique[]'
+**≤100 rows** — dry-run emits one preview line per record:
+```json
+{"ok":true,"dry_run":true,"executed":false,"mutation_kind":"RecordMutation","command":"objects delete contacts","target":{"kind":"contacts_record","id":"123","name":"123"}}
 ```
+Re-run without `--dry-run` to execute.
 
-### Find Contacts Missing a Field and Update
-
-```bash
-hubspot objects search --type contacts --filter "!email" \
-| jq -c '{id, properties: {email: "missing@placeholder.com"}}' \
-| hubspot objects update --type contacts
+**>100 rows** — dry-run emits a single `BulkData` line with a digest and an `apply_command_hint`:
+```json
+{"ok":true,"dry_run":true,"executed":false,"mutation_kind":"BulkData","portal":"150890","target":{"name":"202 records"},"impact":{"records_affected":202,"reversible":false},"digest":"blast-29cfdd48b583","expires_in_seconds":300,"apply_command_hint":"hubspot objects delete contacts --digest blast-29cfdd48b583 --confirm '202'"}
 ```
+You must re-run with `--digest <hash> --confirm <value>` within 5 minutes. The `confirm` value is the record count (deletes) or the secondary ID (merge). Read it off `apply_command_hint`.
 
-### Bulk Delete Pattern
-
-Requires `export HUBSPOT_ACCESS_TOKEN=<token>` (User OAuth cannot delete).
+Three-step pattern:
 
 ```bash
-# Dry-run first
+# 1. Preview
 hubspot objects search --type contacts --filter "lifecyclestage=subscriber" \
+| jq -c '{id}' \
+| hubspot objects delete --type contacts --dry-run \
+| tee /tmp/preview.jsonl
+
+# 2. Lift the digest + confirm value (only present for >100 rows)
+digest=$(jq -r 'select(.mutation_kind=="BulkData") | .digest' /tmp/preview.jsonl)
+confirm=$(jq -r 'select(.mutation_kind=="BulkData") | .impact.records_affected' /tmp/preview.jsonl)
+
+# 3. Execute — re-pipe the SAME inputs
+hubspot objects search --type contacts --filter "lifecyclestage=subscriber" \
+| jq -c '{id}' \
+| hubspot objects delete --type contacts --digest "$digest" --confirm "$confirm"
+```
+
+## Recovery via `hubspot history`
+
+Every destructive op (and its dry-run) is logged locally. Check what happened in the last hour and what's reversible:
+
+```bash
+hubspot history --since 1h --format table
+hubspot history --since 24h --kind BulkData       # only bulk ops
+hubspot history --since 7d --kind MetadataDestroy # schema deletes
+```
+
+`history` does not currently restore records — it's an audit log. See `CLI_IMPROVEMENTS.md` #8 for the revert ask. If you nuked something by mistake, capture the history line and tell the user to restore via the UI.
+
+## Upsert beats search-then-create
+
+For "create if missing, update if present" (the enrichment pattern), use `upsert` — one CLI call per record, no race condition:
+
+```bash
+cat external.jsonl \
+| jq -c '{idProperty:"email", id:.email, properties:{firstname:.first, lastname:.last, company:.company}}' \
+| hubspot objects upsert --type contacts --dry-run
+
+# Or set idProperty once:
+cat external.jsonl \
+| jq -c '{id:.email, properties:{firstname:.first}}' \
+| hubspot objects upsert --type contacts --id-property email
+```
+
+## Rate-limit hygiene
+
+There is no true batch endpoint behind `update`/`delete`/`upsert` — the CLI issues one API call per stdin line. Test with `head -n 50` before piping a 50k-row file. If the API starts 429ing, the per-line output will show `{"ok":false,"error":{"status":429,...}}` — split your input file and retry the failed lines.
+
+## Common reshapes
+
+See `resources/json-patterns.md` for the full set. The two you need 90% of the time:
+
+```bash
+# Read → update payload
+hubspot objects search --type contacts --filter "industry=Tech" \
+| jq -c '{id, properties:{lifecyclestage:"marketingqualifiedlead"}}' \
+| hubspot objects update --type contacts
+
+# Search → delete list
+hubspot objects search --type contacts --filter "!email" \
 | jq -c '{id}' \
 | hubspot objects delete --type contacts --dry-run
-
-# Execute
-hubspot objects search --type contacts --filter "lifecyclestage=subscriber" \
-| jq -c '{id}' \
-| hubspot objects delete --type contacts
 ```
 
-### Bulk Association Pattern
+## Known constraints
 
-```bash
-# Associate all deals owned by rep 12345 to company 456
-hubspot objects search --type deals --filter "hubspot_owner_id=12345" \
-| jq -c '{from: ("deals:" + .id), to: "companies:456"}' \
-| hubspot associations create
-```
-
-### Save Results for Later Processing
-
-```bash
-# Save search results to file
-hubspot objects search --type contacts --filter "lifecyclestage=lead" \
-  --properties email,firstname,lastname > leads.jsonl
-
-# Process a saved file
-cat leads.jsonl \
-| jq -c '{id, properties: {lifecyclestage: "marketingqualifiedlead"}}' \
-| hubspot objects update --type contacts
-```
-
-## Known Limitations
-- No auto-pagination: the CLI returns at most 100 records per call. Use the pagination loop above for larger datasets.
-- No true batch API: bulk mutations make one API call per record. Use `head -n 50` to test at small scale before running full operations to avoid hitting rate limits.
-- Deletes require a private app token (`HUBSPOT_ACCESS_TOKEN`). User OAuth login cannot perform deletes.
-- No Lists API: cannot create or manage HubSpot contact/company lists from the CLI. Use HubSpot UI for list creation.
-- No sequences/cadences API, no contact merge, no Conversations/Inbox API, no marketing emails API.
+- Some destructive operations may be blocked under user-OAuth (browser login); set `HUBSPOT_ACCESS_TOKEN` (private app token) when running deletes if the CLI returns a permission error. See `CLI_IMPROVEMENTS.md` #9 — `whoami --can ...` preflight is on the ask list.
+- `hubspot owners list` returns CRM users; there is no `teams` object. For team-level operations, group by `hubspot_owner_id` client-side.
+- No Lists API, no sequences/cadences API in the current CLI surface. See `CLI_IMPROVEMENTS.md` for what's tracked.
