@@ -8,6 +8,12 @@ triggers:
   - "recent activity"
   - "communication history"
   - "meeting prep"
+  - "transcripts"
+  - "call transcripts"
+  - "dump transcripts"
+  - "fetch transcripts"
+  - "call recordings"
+  - "export transcripts"
 ---
 
 Read `bulk-operations/SKILL.md` first — JSONL piping, batch read, and `jq` reshape patterns (`resources/json-patterns.md`) apply. `hubspot activities list --help` is the source of truth.
@@ -69,6 +75,26 @@ echo "=== Recent Activity ==="
 hubspot activities list --contact $cid --limit 10 \
 | jq -r '"\(.timestamp[0:10])  \(.type)  \(.title)"'
 ```
+
+## Transcripts
+
+Fetch the transcript for a single call by engagement ID:
+
+```bash
+hubspot activities calls transcript get --call 54321
+```
+
+Dump all call transcripts to a file:
+
+```bash
+hubspot objects list --type calls --limit 100 --properties hs_call_title \
+| jq -r '.id' \
+| while read -r call_id; do
+    hubspot activities calls transcript get --call "$call_id"
+  done > /tmp/transcripts.jsonl
+```
+
+Output shape: `{"transcriptId":"...","engagementId":...,"transcriptSource":"...","utterances":[...],"createdAt":...}`. The `utterances` array contains the speech content; it will be empty if no transcript was recorded or uploaded.
 
 ## Constraints
 

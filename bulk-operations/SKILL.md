@@ -54,25 +54,40 @@ printf '12345\n67890\n23456\n' | hubspot objects get --type contacts --propertie
 
 A single `hubspot objects get` reads up to ~100 IDs per call via the batch endpoint. For more, page in chunks of 100.
 
+## Bulk flow: paginate first, then reshape, then write
+
+When operating on all records of a type (or all matches of a filter), **always start with `pagination-loop.sh`** — never run a bare `list` or `search` to "check how many there are." A bare call returns at most 100 records and you will have to re-fetch them anyway.
+
+The canonical bulk pattern is:
+
+1. **Paginate** all records to a JSONL file
+2. **Reshape** with `jq` into the write payload
+3. **Pipe** to the write command (`update`, `delete`, etc.) with `--dry-run` first
+
 ## Pagination
 
-`list` and `search` return at most 100 records per call. Use `--format json` to get the cursor under `meta.next`, then re-run with `--after <cursor>` until the cursor is empty.
+`list` and `search` return at most 100 records per call. Use `resources/pagination-loop.sh` to collect all pages into a single JSONL file:
 
 ```bash
-after=""
-while :; do
-  if [ -z "$after" ]; then
-    page=$(hubspot objects search --type contacts --filter "lifecyclestage=lead" --limit 100 --format json)
-  else
-    page=$(hubspot objects search --type contacts --filter "lifecyclestage=lead" --limit 100 --after "$after" --format json)
-  fi
-  echo "$page" | jq -c '.data[]' >> /tmp/leads.jsonl
-  after=$(echo "$page" | jq -r '.meta.next // empty')
-  [ -z "$after" ] && break
-done
+bash resources/pagination-loop.sh <object_type> <output_file> [properties] [extra_flags...]
 ```
 
-Same loop works for `list`. See `CLI_IMPROVEMENTS.md` #2 — auto-pagination is on the ask list.
+Examples:
+
+```bash
+# All contacts with specific properties
+bash resources/pagination-loop.sh contacts /tmp/contacts.jsonl email,firstname,lastname
+
+# Search with a filter (passes extra flags through to the CLI)
+bash resources/pagination-loop.sh contacts /tmp/leads.jsonl email,firstname '--filter' 'lifecyclestage=lead'
+
+# All deals, default properties
+bash resources/pagination-loop.sh deals /tmp/deals.jsonl
+```
+
+The script pages through `--after` cursors automatically, prints progress to stderr, and writes JSONL to the output file. Run it as a single foreground command — do not background it or reconstruct the loop inline.
+
+See `CLI_IMPROVEMENTS.md` #2 — auto-pagination is on the ask list.
 
 ## Write in batch — always pipe
 

@@ -11,45 +11,48 @@
 # Pass the cursor value back as --after on the next call.
 #
 # USAGE:
-#   Edit OBJECT_TYPE, OUTPUT_FILE, and optionally PROPERTIES / EXTRA_FLAGS below,
-#   then run:
-#     bash pagination-loop.sh
+#   bash pagination-loop.sh <object_type> <output_file> [properties] [extra_flags...]
 #
-# To adapt for search instead of list, swap the hubspot command in the loop body
-# and add --filter flags to EXTRA_FLAGS.
+# EXAMPLES:
+#   bash pagination-loop.sh contacts /tmp/contacts.jsonl
+#   bash pagination-loop.sh contacts /tmp/contacts.jsonl email,firstname,lastname
+#   bash pagination-loop.sh contacts /tmp/leads.jsonl email,firstname '--filter lifecyclestage=lead'
+#
+# To use search instead of list, pass --filter flags as extra_flags.
 
-set -euo pipefail
+set -eo pipefail
 
-# ── Configuration ────────────────────────────────────────────────────────────
+OBJECT_TYPE="${1:?Usage: pagination-loop.sh <object_type> <output_file> [properties] [extra_flags...]}"
+OUTPUT_FILE="${2:?Usage: pagination-loop.sh <object_type> <output_file> [properties] [extra_flags...]}"
+PROPERTIES="${3:-}"
+shift 3 2>/dev/null || shift $#
+EXTRA_FLAGS=("$@")
 
-OBJECT_TYPE="contacts"          # contacts | companies | deals | tickets | ...
-OUTPUT_FILE="all_${OBJECT_TYPE}.jsonl"
-LIMIT=100                       # max per page; CLI cap is 100
+LIMIT=100
 
-# Optional: comma-separated list of properties to fetch.
-# Leave empty to get the default property set.
-PROPERTIES=""                   # e.g. "email,firstname,lastname,hubspot_owner_id"
+# ── Build base command args ──────────────────────────────────────────────────
 
-# Optional: extra flags appended to each hubspot call.
-# For search-based pagination, replace "objects list" with "objects search"
-# and add --filter flags here, e.g.: EXTRA_FLAGS="--filter lifecyclestage=lead"
-EXTRA_FLAGS=""
+# Auto-detect: use "objects search" when --filter is present, "objects list" otherwise
+SUBCOMMAND="list"
+for flag in "${EXTRA_FLAGS[@]}"; do
+  if [ "$flag" = "--filter" ]; then
+    SUBCOMMAND="search"
+    break
+  fi
+done
 
-# ── Build base command ───────────────────────────────────────────────────────
-
-BASE_CMD="hubspot objects list --type ${OBJECT_TYPE} --limit ${LIMIT} --format json"
+BASE_ARGS=(hubspot objects "$SUBCOMMAND" --type "$OBJECT_TYPE" --limit "$LIMIT" --format json)
 
 if [ -n "$PROPERTIES" ]; then
-  BASE_CMD="${BASE_CMD} --properties ${PROPERTIES}"
+  BASE_ARGS+=(--properties "$PROPERTIES")
 fi
 
-if [ -n "$EXTRA_FLAGS" ]; then
-  BASE_CMD="${BASE_CMD} ${EXTRA_FLAGS}"
+if [ ${#EXTRA_FLAGS[@]} -gt 0 ]; then
+  BASE_ARGS+=("${EXTRA_FLAGS[@]}")
 fi
 
 # ── Pagination loop ──────────────────────────────────────────────────────────
 
-# Truncate output file at start (not append, so reruns are safe)
 > "$OUTPUT_FILE"
 
 after=""
@@ -61,18 +64,16 @@ while true; do
   page=$((page + 1))
 
   if [ -z "$after" ]; then
-    result=$(eval "$BASE_CMD")
+    result=$("${BASE_ARGS[@]}")
   else
-    result=$(eval "$BASE_CMD --after '$after'")
+    result=$("${BASE_ARGS[@]}" --after "$after")
   fi
 
-  # Write each record as a single JSONL line
   count=$(echo "$result" | jq '.data | length')
   echo "$result" | jq -c '.data[]' >> "$OUTPUT_FILE"
 
   echo "  page ${page}: ${count} records" >&2
 
-  # Extract cursor for next page; empty string if absent
   next=$(echo "$result" | jq -r '.meta.next // empty')
 
   if [ -z "$next" ]; then
@@ -84,15 +85,3 @@ done
 
 total=$(wc -l < "$OUTPUT_FILE" | tr -d ' ')
 echo "Done. ${total} total records written to ${OUTPUT_FILE}" >&2
-
-# ── Example: pipe accumulated results into a bulk update ────────────────────
-#
-# After this script finishes you can process the file in a second pass:
-#
-#   cat all_contacts.jsonl \
-#   | jq -c '{id, properties: {lifecyclestage: "marketingqualifiedlead"}}' \
-#   | hubspot objects update --type contacts --dry-run
-#
-# Or chain directly without saving to file by replacing the loop body with
-# a direct pipe — but saving first is safer for large datasets because it
-# lets you inspect before mutating.
