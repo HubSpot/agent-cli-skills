@@ -38,7 +38,7 @@ HubSpot may auto-update `lifecyclestage` when a deal associates or closes — bu
 
 `hs_lead_status` is the sales outreach state, independent of lifecycle stage. Common values: `NEW`, `OPEN`, `IN_PROGRESS`, `CONNECTED`, `OPEN_DEAL`, `UNQUALIFIED`, `ATTEMPTED_TO_CONTACT`, `BAD_TIMING`. Pair `OPEN_DEAL` with `salesqualifiedlead` when creating a deal; pair `UNQUALIFIED` with a disqualification (no lifecycle change).
 
-For the live list of allowed values in this portal: `hubspot properties list --object contacts --format jsonl | jq 'select(.name=="hs_lead_status")'`.
+For the live list of allowed values in this portal: `hubspot properties list --type contacts --format jsonl | jq 'select(.name=="hs_lead_status")'`.
 
 ## Qualification filter checklist
 

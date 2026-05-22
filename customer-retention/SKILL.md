@@ -22,7 +22,7 @@ triggers:
 
 Read `bulk-operations/SKILL.md` first — every read/write below uses its JSONL pipe, pagination, and dry-run/digest patterns. Activity-property tables and association rules live in `sales-execution/SKILL.md`.
 
-Schema is portal-specific. Verify each property before filtering — e.g. `hubspot properties get --object contacts notes_last_contacted`, `... hs_last_sales_activity_date`, `... --object subscriptions hs_subscription_status`. If `subscriptions` returns 403, your token lacks `subscriptions-read` — use a private-app token with that scope.
+Schema is portal-specific. Verify each property before filtering — e.g. `hubspot properties get --type contacts notes_last_contacted`, `... hs_last_sales_activity_date`, `... --type subscriptions hs_subscription_status`. If `subscriptions` returns 403, your token lacks `subscriptions-read` — use a private-app token with that scope.
 
 ## 1 — Find inactive customers
 
@@ -52,7 +52,7 @@ For more signals (email opt-out, stale tickets, no open deals) see `resources/cu
 `subscriptions` is a standard object (`hubspot objects types` confirms). Enum values for `hs_subscription_status` are portal-specific — verify before filtering, then plug the exact value in:
 
 ```bash
-hubspot properties get --object subscriptions hs_subscription_status   # lists allowed values
+hubspot properties get --type subscriptions hs_subscription_status   # lists allowed values
 
 # Past-due — revenue at immediate risk (substitute your verified value)
 hubspot objects search --type subscriptions \

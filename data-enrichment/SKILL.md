@@ -21,7 +21,7 @@ Per line out: `{"id":"123","ok":true,"data":{...,"new":true|false}}` or `{"ok":f
 
 ## CSV/JSONL → upsert stream
 
-Reshape with `jq`, preview with `--dry-run`, then execute. Always lowercase the natural key — CRM match is exact. Confirm available property names with `hubspot properties list --object contacts`; never hard-code a list. See `bulk-operations/resources/json-patterns.md` for reshape idioms.
+Reshape with `jq`, preview with `--dry-run`, then execute. Always lowercase the natural key — CRM match is exact. Confirm available property names with `hubspot properties list --type contacts`; never hard-code a list. See `bulk-operations/resources/json-patterns.md` for reshape idioms.
 
 ```bash
 # CSV → JSONL (any tool); example using csvkit

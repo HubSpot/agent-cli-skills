@@ -26,18 +26,18 @@ triggers:
 
 ## Foundations
 
-Read `bulk-operations/SKILL.md` first — JSONL piping, batch read, pagination, and the dry-run/digest/confirm flow live there. Reshape recipes are in `bulk-operations/resources/json-patterns.md`. `hubspot <command> --help` is the source of truth. Object types are plural (`contacts`, `deals`, `companies`). For property reference: `hubspot properties list --object deals` — don't hardcode property tables.
+Read `bulk-operations/SKILL.md` first — JSONL piping, batch read, pagination, and the dry-run/digest/confirm flow live there. Reshape recipes are in `bulk-operations/resources/json-patterns.md`. `hubspot <command> --help` is the source of truth. Object types are plural (`contacts`, `deals`, `companies`). For property reference: `hubspot properties list --type deals` — don't hardcode property tables.
 
 ## 1. Discover pipelines and stages
 
 Pipeline and stage IDs are **portal-specific**. Always discover at runtime — never hardcode across portals.
 
 ```bash
-hubspot pipelines list --object deals --format jsonl
+hubspot pipelines list --type deals --format jsonl
 # {"id":"default","label":"Sales Pipeline","displayOrder":0}
 # {"id":"e3955620-000b-4bee-bef5-e19366fc27f2","label":"Bash Pipeline","displayOrder":1}
 
-hubspot pipelines stages --object deals --pipeline default --format jsonl
+hubspot pipelines stages --type deals --pipeline default --format jsonl
 # {"id":"appointmentscheduled","label":"Appointment Scheduled","displayOrder":0}
 # {"id":"qualifiedtobuy","label":"Qualified To Buy","displayOrder":1}
 # ...
@@ -48,7 +48,7 @@ hubspot pipelines stages --object deals --pipeline default --format jsonl
 Grab a specific stage ID by label:
 
 ```bash
-QUALIFIED=$(hubspot pipelines stages --object deals --pipeline default --format jsonl \
+QUALIFIED=$(hubspot pipelines stages --type deals --pipeline default --format jsonl \
   | jq -r 'select(.label=="Qualified To Buy") | .id')
 ```
 

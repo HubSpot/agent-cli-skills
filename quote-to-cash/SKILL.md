@@ -24,7 +24,7 @@ triggers:
 
 Read `bulk-operations/SKILL.md` first — JSONL piping, batch read, pagination, and the dry-run/digest/confirm flow for destructive ops live there. Reshape recipes (read → write payload) are in `bulk-operations/resources/json-patterns.md`.
 
-`hubspot <command> --help` is the source of truth. Object types are plural (`products`, `line_items`, `quotes`, `invoices`, `subscriptions`). Never hardcode property tables — `hubspot properties list --object <type>` is one call away. Verify any enum value the agent is about to write with `hubspot properties get --object <type> --name <property>` and read `options[].value`.
+`hubspot <command> --help` is the source of truth. Object types are plural (`products`, `line_items`, `quotes`, `invoices`, `subscriptions`). Never hardcode property tables — `hubspot properties list --type <type>` is one call away. Verify any enum value the agent is about to write with `hubspot properties get --type <type> --name <property>` and read `options[].value`.
 
 Portal note: `invoices`, `subscriptions`, `orders`, `carts` show an empty `objectTypeId` in `hubspot objects types`. They work through `objects search`/`list` when the token has the matching scope (`invoices-read`, `subscriptions-read`, etc.) and 403 otherwise. CLI-created quotes are always `DRAFT`; approval routing, share links, PDF generation, and invoice creation usually require the HubSpot UI.
 
@@ -37,7 +37,7 @@ hubspot objects create --type products \
   --property hs_sku=ENT-001
 ```
 
-For a recurring product set `recurringbillingfrequency`; check the API enum values first with `hubspot properties get --object products --name recurringbillingfrequency --format json | jq -r '.options[].value'`. Bulk-import a catalog by piping JSONL of `{"properties":{...}}` to `hubspot objects create --type products --dry-run`.
+For a recurring product set `recurringbillingfrequency`; check the API enum values first with `hubspot properties get --type products --name recurringbillingfrequency --format json | jq -r '.options[].value'`. Bulk-import a catalog by piping JSONL of `{"properties":{...}}` to `hubspot objects create --type products --dry-run`.
 
 ## 2. Build a quote: line items → quote → associations
 
@@ -69,7 +69,7 @@ jq -r '.id' /tmp/lineitems.jsonl \
 hubspot associations create --from "deals:$DEAL_ID" --to "quotes:$QUOTE_ID"
 ```
 
-Discount handling — `discount` is the writable percentage (`10` = 10% off). `hs_total_discount` is HubSpot-computed; do not set it. Verify with `hubspot properties get --object line_items --name hs_total_discount` (look for `modificationMetadata.readOnlyValue:true`) before relying on this in a portal you don't own.
+Discount handling — `discount` is the writable percentage (`10` = 10% off). `hs_total_discount` is HubSpot-computed; do not set it. Verify with `hubspot properties get --type line_items --name hs_total_discount` (look for `modificationMetadata.readOnlyValue:true`) before relying on this in a portal you don't own.
 
 Promote a quote out of `DRAFT` when ready to share:
 
@@ -77,7 +77,7 @@ Promote a quote out of `DRAFT` when ready to share:
 hubspot objects update --type quotes <quote_id> --property hs_status=APPROVAL_NOT_NEEDED
 ```
 
-Verify `hs_status` enum values for your portal: `hubspot properties get --object quotes --name hs_status --format json | jq -r '.options[].value'`.
+Verify `hs_status` enum values for your portal: `hubspot properties get --type quotes --name hs_status --format json | jq -r '.options[].value'`.
 
 ## 3. Track invoices
 
@@ -100,14 +100,14 @@ hubspot objects search --type invoices \
   --properties hs_number,hs_amount_billed,hs_invoice_date
 ```
 
-Verify the status enum the same way: `hubspot properties get --object invoices --name hs_invoice_status --format json | jq -r '.options[].value'`.
+Verify the status enum the same way: `hubspot properties get --type invoices --name hs_invoice_status --format json | jq -r '.options[].value'`.
 
 ## 4. Track subscriptions
 
 Same shape, filter on `hs_subscription_status`. Verify the enum values before writing the filter — do not hardcode `ACTIVE`/`CANCELLED`/`PAST_DUE`:
 
 ```bash
-hubspot properties get --object subscriptions --name hs_subscription_status --format json \
+hubspot properties get --type subscriptions --name hs_subscription_status --format json \
   | jq -r '.options[].value'
 
 # Then filter (case matters)

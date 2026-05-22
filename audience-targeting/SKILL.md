@@ -29,7 +29,7 @@ Source of truth: `hubspot objects search --help`.
 
 ## Properties this skill turns on
 
-Full live list: `hubspot properties list --object contacts`. Enum options aren't exposed by `properties get`; discover with `hubspot objects list --type contacts --properties <name> --limit 100 --format json | jq -r '.data[].properties.<name> // empty' | sort -u`.
+Full live list: `hubspot properties list --type contacts`. Enum options aren't exposed by `properties get`; discover with `hubspot objects list --type contacts --properties <name> --limit 100 --format json | jq -r '.data[].properties.<name> // empty' | sort -u`.
 
 Core fields used here: `lifecyclestage`, `hubspot_owner_id` (bare/`!` for owned/unowned; `hubspot owners list` for IDs), `hs_email_optout` (`!=true` excludes opted-out), `hs_email_last_open_date` / `notes_last_contacted` (recency), `jobtitle` / `country` / `city` (string `=` or `~`), `num_associated_deals` (0 net-new, `>=1` has-pipeline).
 

@@ -44,7 +44,7 @@ Add new entries at the bottom. Keep each entry to ≤4 lines.
 
 ## 7. Curated property sets
 
-**Ask:** `hubspot properties suggest --object contacts --intent <lookup|segmentation|reporting>` returns a JSON list of properties relevant to that intent.
+**Ask:** `hubspot properties suggest --type contacts --intent <lookup|segmentation|reporting>` returns a JSON list of properties relevant to that intent.
 **Why:** Every skill currently hand-maintains a "default property set." That's metadata that belongs in the CLI.
 **Used by:** `crm-lookup`, `audience-targeting`, `sales-reporting`.
 
@@ -86,7 +86,7 @@ Add new entries at the bottom. Keep each entry to ≤4 lines.
 
 ## 14. `properties get/list` should return enumeration option values
 
-**Ask:** `hubspot properties get --object tickets hs_ticket_priority` should include the allowed enum values; add `--include-options` or always include them for `enumeration`-type properties.
+**Ask:** `hubspot properties get --type tickets hs_ticket_priority` should include the allowed enum values; add `--include-options` or always include them for `enumeration`-type properties.
 **Why:** Today the only way to discover allowed enum values is to probe with an invalid value and parse the 400 error string, or sample live records. Skills end up shipping static reference tables that go stale.
 **Used by:** `ticket-resolution`, `sales-execution`, `customer-retention`, `quote-to-cash`.
 
@@ -116,7 +116,7 @@ Add new entries at the bottom. Keep each entry to ≤4 lines.
 
 ## 19. Pipeline stage probability missing from `pipelines stages`
 
-**Ask:** `hubspot pipelines stages --object deals --pipeline default` should include each stage's `probability` so agents can distinguish won vs lost stages from metadata.
+**Ask:** `hubspot pipelines stages --type deals --pipeline default` should include each stage's `probability` so agents can distinguish won vs lost stages from metadata.
 **Why:** Today the only programmatic signal for won/lost is `hs_is_closed_won` on the deal record. Stage probability belongs on the stage, not on every closed deal.
 **Used by:** `sales-reporting`, `deal-management`.
 

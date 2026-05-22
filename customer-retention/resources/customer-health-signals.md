@@ -1,6 +1,6 @@
 # Customer Health Signals — Filter Cookbook
 
-Churn-risk filter expressions organized by tier. Drop these into `hubspot objects search --filter "..."`. Verify every property/enum in your portal first via `hubspot properties get --object <type> <name>` — the SKILL.md "Verify properties" step is mandatory.
+Churn-risk filter expressions organized by tier. Drop these into `hubspot objects search --filter "..."`. Verify every property/enum in your portal first via `hubspot properties get --type <type> <name>` — the SKILL.md "Verify properties" step is mandatory.
 
 Date macros below work on both macOS and Linux:
 
@@ -31,7 +31,7 @@ hubspot objects search --type contacts \
 
 ### Subscription past-due / cancelled
 
-`hs_subscription_status` enum is portal-specific — run `hubspot properties get --object subscriptions hs_subscription_status` and substitute the exact value. Requires the `subscriptions-read` scope on your token.
+`hs_subscription_status` enum is portal-specific — run `hubspot properties get --type subscriptions hs_subscription_status` and substitute the exact value. Requires the `subscriptions-read` scope on your token.
 
 ```bash
 hubspot objects search --type subscriptions \

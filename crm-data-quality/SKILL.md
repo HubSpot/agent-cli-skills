@@ -19,11 +19,11 @@ Read `bulk-operations/SKILL.md` first — JSONL piping, batch read, pagination, 
 Don't guess property names. List them:
 
 ```bash
-hubspot properties list --object contacts --format table
-hubspot properties list --object contacts | jq -c 'select(.type=="enumeration") | {name, label}'
+hubspot properties list --type contacts --format table
+hubspot properties list --type contacts | jq -c 'select(.type=="enumeration") | {name, label}'
 ```
 
-Same for `--object companies`, `deals`, or any custom type (`hubspot objects types`).
+Same for `--type companies`, `deals`, or any custom type (`hubspot objects types`).
 
 ## 1. Find incomplete records
 
@@ -86,13 +86,13 @@ For >100 pairs, lift `digest` and `impact.records_affected` from the `BulkData` 
 
 ```bash
 # Count properties per group (HubSpot groups standard fields; custom groups stand out)
-hubspot properties list --object contacts | jq -rs 'group_by(.groupName) | map({group: .[0].groupName, count: length}) | .[]'
+hubspot properties list --type contacts | jq -rs 'group_by(.groupName) | map({group: .[0].groupName, count: length}) | .[]'
 
 # All enumeration properties
-hubspot properties list --object contacts | jq -c 'select(.type=="enumeration") | {name, label, fieldType}'
+hubspot properties list --type contacts | jq -c 'select(.type=="enumeration") | {name, label, fieldType}'
 
 # Create a DQ flag property, then set it via the normalize pattern in section 2
-hubspot properties create --object contacts --name dq_missing_phone --label "DQ: Missing Phone" --type string --field-type text
+hubspot properties create --type contacts --name dq_missing_phone --label "DQ: Missing Phone" --prop-type string --field-type text
 ```
 
 ## Recovery

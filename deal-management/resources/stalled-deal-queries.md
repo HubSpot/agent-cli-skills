@@ -44,7 +44,7 @@ hubspot objects search --type deals \
 
 ## Stuck in a specific stage with old close dates
 
-Discover the stage ID first: `hubspot pipelines stages --object deals --pipeline <pipeline_id>`.
+Discover the stage ID first: `hubspot pipelines stages --type deals --pipeline <pipeline_id>`.
 
 ```bash
 hubspot objects search --type deals \

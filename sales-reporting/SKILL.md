@@ -23,7 +23,7 @@ triggers:
 - All CRM property values come back as **strings** in JSONL — booleans included. `hs_is_closed_won` is returned as `"true"`/`"false"` (string); `amount` is a numeric string. Use `tonumber` for arithmetic; compare booleans as strings (`== "true"`) when filtering client-side.
 - In `--filter` expressions, `hs_is_closed_won=true` and `hs_is_closed!=true` work — the API parses the value.
 - `--properties` returns the standard nested shape: `{"id":"123","properties":{"amount":"5000","dealname":"..."}}`. Reference fields as `.properties.amount` in jq.
-- Stage IDs in `dealstage` are portal-specific. Map them with `hubspot pipelines stages --object deals --pipeline <id>`.
+- Stage IDs in `dealstage` are portal-specific. Map them with `hubspot pipelines stages --type deals --pipeline <id>`.
 - `hubspot_owner_id` is a numeric string. Resolve to a name with `hubspot owners list` (fields: `id`, `firstName`, `lastName`, `email`).
 
 ## 1. Daily briefing

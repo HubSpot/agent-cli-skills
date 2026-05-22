@@ -1,6 +1,6 @@
 # Activity Properties — Quick Reference
 
-Property names and enum values for `hubspot objects create --type {calls|notes|meetings|tasks}`. Kept here because `hubspot properties list --object calls` is noisy (~80 props) and `hubspot properties get` does not expose enum option values today — so the values below are not otherwise discoverable from the CLI. Verify against the portal if a value is rejected.
+Property names and enum values for `hubspot objects create --type {calls|notes|meetings|tasks}`. Kept here because `hubspot properties list --type calls` is noisy (~80 props) and `hubspot properties get` does not expose enum option values today — so the values below are not otherwise discoverable from the CLI. Verify against the portal if a value is rejected.
 
 ## calls
 

@@ -17,7 +17,7 @@ triggers:
 
 ## Pick properties from the live schema
 
-Schemas drift. Run `hubspot properties list --object <type>` for the live set. First-pass `--properties` for a brief:
+Schemas drift. Run `hubspot properties list --type <type>` for the live set. First-pass `--properties` for a brief:
 
 | Object | `--properties` |
 |---|---|
@@ -26,7 +26,7 @@ Schemas drift. Run `hubspot properties list --object <type>` for the live set. F
 | deals | `dealname,amount,dealstage,closedate,hubspot_owner_id,hs_is_closed_won` |
 | tickets | `subject,hs_pipeline_stage,hs_ticket_priority,hubspot_owner_id` |
 
-Contact ad/campaign attribution lives on `hs_analytics_*` (e.g. `hs_analytics_source`, `hs_analytics_source_data_1`/`_2`, `hs_analytics_first_touch_converting_campaign`, `hs_analytics_last_touch_converting_campaign`). Full list: `hubspot properties list --object contacts | grep hs_analytics_`.
+Contact ad/campaign attribution lives on `hs_analytics_*` (e.g. `hs_analytics_source`, `hs_analytics_source_data_1`/`_2`, `hs_analytics_first_touch_converting_campaign`, `hs_analytics_last_touch_converting_campaign`). Full list: `hubspot properties list --type contacts | grep hs_analytics_`.
 
 ## 1. Lookup by ID
 

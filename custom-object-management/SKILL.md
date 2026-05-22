@@ -55,7 +55,7 @@ cat equipment-schema.json | hubspot schemas create --dry-run   # preview
 hubspot schemas create --file equipment-schema.json            # execute
 ```
 
-Add more properties later with `hubspot properties create --object <name> ...`.
+Add more properties later with `hubspot properties create --type <name> ...`.
 
 ## Update schema metadata
 

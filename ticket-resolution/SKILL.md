@@ -21,8 +21,8 @@ Read `bulk-operations/SKILL.md` first — JSONL piping, batch read, pagination, 
 Stage IDs differ in every portal — never hard-code them.
 
 ```bash
-hubspot pipelines list --object tickets --format table
-hubspot pipelines stages --object tickets --pipeline <pipeline_id> --format table
+hubspot pipelines list --type tickets --format table
+hubspot pipelines stages --type tickets --pipeline <pipeline_id> --format table
 ```
 
 The stage table prints each stage's `ID` and `Label` ("New", "Waiting on contact", "Closed", etc.).
