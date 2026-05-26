@@ -23,7 +23,7 @@ hubspot schemas list | jq 'select(.source=="custom")'      # custom only
 hubspot objects types | jq -c 'select(.source=="custom")'  # same set, also shown to confirm `--type` resolves
 ```
 
-`name` is what every other command takes. `objectTypeId` (e.g. `2-62052093`) is only needed for workflow `PLATFORM_FLOW` targets.
+`name` is what every other command takes. `objectTypeId` (e.g. `2-12345678`) is only needed for workflow `PLATFORM_FLOW` targets.
 
 ## Inspect one schema
 

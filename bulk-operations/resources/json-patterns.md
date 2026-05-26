@@ -1,6 +1,6 @@
 # JSON reshape patterns
 
-All examples assume JSONL input from `hubspot objects list|search|get`. Output always nests under `.properties` — `--properties a,b` limits the field set but does **not** flatten the shape (despite what `hubspot objects get --help` currently claims; CLI improvement #11).
+All examples assume JSONL input from `hubspot objects list|search|get`. Output always nests under `.properties`; `--properties a,b` limits the field set returned.
 
 These are the reshapes you actually use. Skip anything you can derive.
 

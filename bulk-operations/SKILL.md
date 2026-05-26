@@ -31,7 +31,7 @@ Every read command (`list`, `search`, `get`) emits JSONL — one JSON object per
 {"id":"123","properties":{"email":"jane@example.com","firstname":"Jane"},"createdAt":"...","updatedAt":"...","archived":false,"url":"..."}
 ```
 
-`--properties email,firstname` limits which fields the server returns under `.properties` — it does **not** flatten the shape (despite what `hubspot objects get --help` currently claims; that's CLI improvement #11). Downstream `jq` should use `.properties.email`, not `.prop_email`.
+`--properties email,firstname` limits which fields the server returns under `.properties`. Downstream `jq` should use `.properties.email`, not `.prop_email`.
 
 Write commands (`create`, `update`, `upsert`, `delete`, `merge`, `associations create`) accept JSONL on stdin and emit JSONL — one result per input line: `{"id":"123","ok":true,"data":{...}}` or `{"id":"123","ok":false,"error":{"status":...,"message":"..."}}`. Order of results matches input order.
 
@@ -87,8 +87,6 @@ bash resources/pagination-loop.sh deals /tmp/deals.jsonl
 
 The script pages through `--after` cursors automatically, prints progress to stderr, and writes JSONL to the output file. Run it as a single foreground command — do not background it or reconstruct the loop inline.
 
-See `CLI_IMPROVEMENTS.md` #2 — auto-pagination is on the ask list.
-
 ## Write in batch — always pipe
 
 Write commands accept JSONL on stdin. The transformation between a read shape and a write shape is a `jq` reshape:
@@ -116,7 +114,7 @@ Re-run without `--dry-run` to execute.
 
 **>100 rows** — dry-run emits a single `BulkData` line with a digest and an `apply_command_hint`:
 ```json
-{"ok":true,"dry_run":true,"executed":false,"mutation_kind":"BulkData","portal":"150890","target":{"name":"202 records"},"impact":{"records_affected":202,"reversible":false},"digest":"blast-29cfdd48b583","expires_in_seconds":300,"apply_command_hint":"hubspot objects delete contacts --digest blast-29cfdd48b583 --confirm '202'"}
+{"ok":true,"dry_run":true,"executed":false,"mutation_kind":"BulkData","portal":"123456","target":{"name":"202 records"},"impact":{"records_affected":202,"reversible":false},"digest":"blast-29cfdd48b583","expires_in_seconds":300,"apply_command_hint":"hubspot objects delete contacts --digest blast-29cfdd48b583 --confirm '202'"}
 ```
 You must re-run with `--digest <hash> --confirm <value>` within 5 minutes. The `confirm` value is the record count (deletes) or the secondary ID (merge). Read it off `apply_command_hint`.
 
@@ -149,7 +147,7 @@ hubspot history --since 24h --kind BulkData       # only bulk ops
 hubspot history --since 7d --kind MetadataDestroy # schema deletes
 ```
 
-`history` does not currently restore records — it's an audit log. See `CLI_IMPROVEMENTS.md` #8 for the revert ask. If you nuked something by mistake, capture the history line and tell the user to restore via the UI.
+`history` does not currently restore records — it's an audit log. If you deleted something by mistake, capture the history line and tell the user to restore via the UI.
 
 ## Upsert beats search-then-create
 
@@ -188,6 +186,6 @@ hubspot objects search --type contacts --filter "!email" \
 
 ## Known constraints
 
-- Some destructive operations may be blocked under user-OAuth (browser login); set `HUBSPOT_ACCESS_TOKEN` (private app token) when running deletes if the CLI returns a permission error. See `CLI_IMPROVEMENTS.md` #9 — `whoami --can ...` preflight is on the ask list.
+- Some destructive operations may be blocked under user-OAuth (browser login); set `HUBSPOT_ACCESS_TOKEN` (private app token) when running deletes if the CLI returns a permission error.
 - `hubspot owners list` returns CRM users; there is no `teams` object. For team-level operations, group by `hubspot_owner_id` client-side.
-- No Lists API, no sequences/cadences API in the current CLI surface. See `CLI_IMPROVEMENTS.md` for what's tracked.
+- No Lists API, no sequences/cadences API in the current CLI surface.

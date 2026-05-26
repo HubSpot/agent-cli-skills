@@ -35,7 +35,7 @@ Pipeline and stage IDs are **portal-specific**. Always discover at runtime — n
 ```bash
 hubspot pipelines list --type deals --format jsonl
 # {"id":"default","label":"Sales Pipeline","displayOrder":0}
-# {"id":"e3955620-000b-4bee-bef5-e19366fc27f2","label":"Bash Pipeline","displayOrder":1}
+# {"id":"a1b2c3d4-0000-0000-0000-000000000000","label":"Enterprise Pipeline","displayOrder":1}
 
 hubspot pipelines stages --type deals --pipeline default --format jsonl
 # {"id":"appointmentscheduled","label":"Appointment Scheduled","displayOrder":0}
@@ -52,7 +52,7 @@ QUALIFIED=$(hubspot pipelines stages --type deals --pipeline default --format js
   | jq -r 'select(.label=="Qualified To Buy") | .id')
 ```
 
-The IDs shown above (`appointmentscheduled`, `closedwon`, etc.) are verified real for portal 150890's `default` pipeline — but discover yours every run.
+The IDs shown above (`appointmentscheduled`, `closedwon`, etc.) are HubSpot's standard `default` deal pipeline stages — but discover yours every run since portals can rename or remove them.
 
 ## 2. Qualify an MQL into a deal
 
