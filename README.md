@@ -42,8 +42,6 @@ npx skills hubspot/agent-cli-skills/bulk-operations
 | `ticket-resolution` | Create and triage support tickets, move them through pipelines, and log resolution |
 | `workflow-automation` | List, create, update, and delete HubSpot workflows from the CLI |
 
-CLI feature requests surfaced by these skills are tracked in [`CLI_IMPROVEMENTS.md`](./CLI_IMPROVEMENTS.md).
-
 ---
 
 ## Support
