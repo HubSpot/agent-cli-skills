@@ -136,12 +136,14 @@ For >100 rows, the dry-run emits a digest line; re-pipe with `--digest <hash> --
 
 ## 4. Find stalled deals
 
-Filter cookbook with dynamic dates lives in `resources/stalled-deal-queries.md`. The core query:
+What counts as "stalled" depends on the team's sales cycle and pipeline-stage SLAs — there's no HubSpot-prescribed cutoff. Ask the user, or derive from their touch cadence. Filter cookbook with all the signal-level queries (past close date, activity gap, stuck stage, etc.) lives in `resources/stalled-deal-queries.md`. The core shape:
 
 ```bash
-# open deals with no activity in 30 days (macOS / Linux date examples in resources)
+# Substitute N for the activity-gap cutoff the user/context justifies
+CUTOFF=$(date -v-${N}d +%Y-%m-%d 2>/dev/null || date -d "${N} days ago" +%Y-%m-%d)
+
 hubspot objects search --type deals \
-  --filter "hs_last_activity_date<$(date -v-30d +%Y-%m-%d) AND hs_is_closed!=true" \
+  --filter "hs_last_activity_date<$CUTOFF AND hs_is_closed!=true" \
   --properties dealname,dealstage,closedate,hubspot_owner_id,hs_last_activity_date
 ```
 

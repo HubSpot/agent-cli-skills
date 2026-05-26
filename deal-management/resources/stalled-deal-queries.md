@@ -1,24 +1,31 @@
-# Stalled Deal Filter Cookbook
+# Deal Pipeline Signals — Filter Cookbook
 
-Filter expressions for surfacing deals that need attention. Substitute date placeholders or use the dynamic-date snippets below — queries stay current with no edits.
+The deal-level signals HubSpot exposes for identifying deals that may need attention, and how to query them. **No definition of "stalled" is prescribed** — what counts as stalled depends on the team's sales cycle (enterprise deals legitimately sit longer than SMB), pipeline-stage SLAs, and forecasting cadence. Ask the user or derive from context before plugging in a cutoff.
 
-## Dynamic dates
+## Picking a cutoff
+
+Before any time-based filter, you need a cutoff date. Don't invent one — ask, or derive:
+
+- **Activity gap** — what's a normal touch cadence for an open deal in this team? "Stalled" is some multiple of that.
+- **Stage age** — does the pipeline have per-stage SLAs (e.g. "should not sit in proposal more than 2 weeks")? Use those.
+- **Close-date drift** — what's the typical cycle length? A deal whose close date is past should usually be flagged immediately; one with a far-future close needs cycle-length context to interpret.
+
+If the user hasn't told you and you can't infer it, ask.
 
 ```bash
-# macOS
-THIRTY_DAYS_AGO=$(date -v-30d +%Y-%m-%d)
-SIXTY_DAYS_AGO=$(date -v-60d +%Y-%m-%d)
-SIXTY_DAYS_OUT=$(date -v+60d +%Y-%m-%d)
-TODAY=$(date +%Y-%m-%d)
-
-# Linux
-THIRTY_DAYS_AGO=$(date -d '30 days ago' +%Y-%m-%d)
-SIXTY_DAYS_AGO=$(date -d '60 days ago' +%Y-%m-%d)
-SIXTY_DAYS_OUT=$(date -d '60 days' +%Y-%m-%d)
+# Substitute N for whatever cutoff the user/context justifies
+CUTOFF=$(date -v-${N}d +%Y-%m-%d 2>/dev/null || date -d "${N} days ago" +%Y-%m-%d)
+FUTURE=$(date -v+${N}d +%Y-%m-%d 2>/dev/null || date -d "${N} days" +%Y-%m-%d)
 TODAY=$(date +%Y-%m-%d)
 ```
 
-## Past close date, still open
+---
+
+## Signals HubSpot exposes
+
+### Past close date, still open
+
+Hard signal — the rep already committed to a close date that has passed. Doesn't need a tunable cutoff; the cutoff is today.
 
 ```bash
 hubspot objects search --type deals \
@@ -26,15 +33,17 @@ hubspot objects search --type deals \
   --properties dealname,dealstage,closedate,hubspot_owner_id,amount
 ```
 
-## No sales activity in 30 days
+### Activity gap — `hs_last_activity_date`
+
+How long since *anything* (call, note, email, task, meeting) happened on the deal. Cutoff should map to the team's touch cadence.
 
 ```bash
 hubspot objects search --type deals \
-  --filter "hs_last_activity_date<$THIRTY_DAYS_AGO AND hs_is_closed!=true" \
+  --filter "hs_last_activity_date<$CUTOFF AND hs_is_closed!=true" \
   --properties dealname,dealstage,closedate,hubspot_owner_id,hs_last_activity_date
 ```
 
-## No activity at all (open deals)
+### No activity ever (open deals)
 
 ```bash
 hubspot objects search --type deals \
@@ -42,51 +51,53 @@ hubspot objects search --type deals \
   --properties dealname,dealstage,closedate,hubspot_owner_id
 ```
 
-## Stuck in a specific stage with old close dates
+### Stuck in a specific stage
 
-Discover the stage ID first: `hubspot pipelines stages --type deals --pipeline <pipeline_id>`.
+Discover stage IDs first: `hubspot pipelines stages --type deals --pipeline <pipeline_id>`. Combine with `closedate` or `hs_last_activity_date` based on how the team measures stuck.
 
 ```bash
 hubspot objects search --type deals \
-  --filter "dealstage=<stage_id> AND closedate<$THIRTY_DAYS_AGO AND hs_is_closed!=true" \
+  --filter "dealstage=<stage_id> AND closedate<$CUTOFF AND hs_is_closed!=true" \
   --properties dealname,closedate,hubspot_owner_id,amount
 ```
 
-## Missing amount
+### Data quality on open deals
+
+Missing required fields on an open deal — usually a data-hygiene flag, not a churn signal. What's "required" is team-defined.
 
 ```bash
+# Missing amount
 hubspot objects search --type deals \
   --filter "!amount AND hs_is_closed!=true" \
   --properties dealname,dealstage,closedate,hubspot_owner_id
-```
 
-## No associated contacts
-
-```bash
+# No associated contacts
 hubspot objects search --type deals \
   --filter "num_associated_contacts<1 AND hs_is_closed!=true" \
   --properties dealname,dealstage,closedate,hubspot_owner_id,amount
 ```
 
-## High probability but no near-term close
+### Pipeline intent vs. close timing — `hs_deal_stage_probability` + `closedate`
 
-Deals showing pipeline intent (probability > 0) with close date pushed far out — strong acceleration candidates.
+`hs_deal_stage_probability` is HubSpot's per-stage win probability (0–1). High probability with a far-future close date can indicate either a long-cycle deal (normal) or pipeline slippage (problem). The `$FUTURE` cutoff is the caller's call — it should reflect the team's forecast horizon.
 
 ```bash
 hubspot objects search --type deals \
-  --filter "hs_deal_stage_probability>0 AND closedate>$SIXTY_DAYS_OUT AND hs_is_closed!=true" \
+  --filter "hs_deal_stage_probability>0 AND closedate>$FUTURE AND hs_is_closed!=true" \
   --properties dealname,dealstage,hs_deal_stage_probability,closedate,amount,hubspot_owner_id
 ```
 
-## Combined stalled-deal report
+---
 
-`--filter` is AND-only within a flag. Use repeated `--filter` flags for OR, or merge multiple queries with `jq -s 'unique_by(.id)'`:
+## Combining signals
+
+`--filter` is AND-only within a single flag. Use repeated `--filter` flags for OR, or merge multiple queries with `jq -s 'unique_by(.id)'`:
 
 ```bash
 {
   hubspot objects search --type deals --filter "closedate<$TODAY AND hs_is_closed!=true"
   hubspot objects search --type deals --filter "!amount AND hs_is_closed!=true"
-  hubspot objects search --type deals --filter "hs_last_activity_date<$THIRTY_DAYS_AGO AND hs_is_closed!=true"
+  hubspot objects search --type deals --filter "hs_last_activity_date<$CUTOFF AND hs_is_closed!=true"
 } | jq -s 'unique_by(.id) | .[]'
 ```
 

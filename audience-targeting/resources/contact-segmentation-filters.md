@@ -1,12 +1,27 @@
 # Contact segmentation filter cookbook
 
-Filter expressions for `hubspot objects search --type contacts`. Add `--properties` to control output. See `audience-targeting/SKILL.md` for syntax rules and `bulk-operations/SKILL.md` for pagination, piping, and destructive-op flow. Discover enum option values per portal with `hubspot objects list --type contacts --properties <name> --limit 100 --format json | jq -r '.data[].properties.<name> // empty' | sort -u`.
+Filter primitives for `hubspot objects search --type contacts`. Add `--properties` to control output. See `audience-targeting/SKILL.md` for syntax rules and `bulk-operations/SKILL.md` for pagination, piping, and destructive-op flow.
+
+**Date thresholds, deal counts, and "engaged"/"unworked" cutoffs are not prescribed here** — what counts as recent, stale, or qualified depends on the team's cadence, cycle length, and definitions. Ask the user or derive from context (touch cadence, SLA, sales cycle) before plugging in a number.
+
+Discover enum option values per portal:
+
+```bash
+hubspot objects list --type contacts --properties <name> --limit 100 --format json \
+  | jq -r '.data[].properties.<name> // empty' | sort -u
+```
+
+Cutoff macro used in examples below (substitute `${N}` per query):
+
+```bash
+CUTOFF=$(date -v-${N}d +%Y-%m-%d 2>/dev/null || date -d "${N} days ago" +%Y-%m-%d)
+```
 
 ---
 
 ## Lifecycle stage
 
-Standard enum values are lowercase, exact match. Confirm options for this portal via the discovery one-liner above.
+Standard enum values are lowercase, exact match. Confirm options for this portal via the discovery one-liner above — portals can extend/rename stages.
 
 ```bash
 --filter "lifecyclestage=subscriber"
@@ -20,7 +35,7 @@ Standard enum values are lowercase, exact match. Confirm options for this portal
 
 ## Lead status
 
-`hs_lead_status` is itself an enum with portal-customizable options. Standard values:
+`hs_lead_status` is itself an enum with portal-customizable options. Common default values (verify in portal):
 
 ```bash
 --filter "hs_lead_status=NEW"
@@ -45,11 +60,11 @@ Standard enum values are lowercase, exact match. Confirm options for this portal
 # Never opened (field absent)
 --filter "!hs_email_last_open_date"
 
-# Opened after a date
---filter "hs_email_last_open_date>2026-01-01"
+# Opened since $CUTOFF
+--filter "hs_email_last_open_date>$CUTOFF"
 
-# Not opened since a date (unengaged)
---filter "hs_email_last_open_date<2026-01-01"
+# Not opened since $CUTOFF
+--filter "hs_email_last_open_date<$CUTOFF"
 
 # Hard bounce on file
 --filter "hs_email_bounce=true"
@@ -57,29 +72,29 @@ Standard enum values are lowercase, exact match. Confirm options for this portal
 # Opted out
 --filter "hs_email_optout=true"
 
-# Opted in (preferred for campaigns)
+# Opted in (use for campaign-eligible cohorts)
 --filter "hs_email_optout!=true"
 
-# Email sent but never opened (low engagement)
+# Email sent but never opened
 --filter "hs_email_last_send_date AND !hs_email_last_open_date"
 ```
 
 ## Activity recency
 
-Dates use `YYYY-MM-DD`.
+Dates use `YYYY-MM-DD`. The cutoff value is the caller's call — derive from the team's touch cadence.
 
 ```bash
-# Contacted in the last 30 days (substitute today minus 30)
---filter "notes_last_contacted>2026-04-15"
+# Contacted since $CUTOFF
+--filter "notes_last_contacted>$CUTOFF"
 
-# Not contacted in the last 90 days
---filter "notes_last_contacted<2026-02-15"
+# Not contacted since $CUTOFF
+--filter "notes_last_contacted<$CUTOFF"
 
 # Never contacted
 --filter "!notes_last_contacted"
 
-# Last sales activity within 14 days
---filter "hs_last_sales_activity_date>2026-05-01"
+# Last sales activity since $CUTOFF
+--filter "hs_last_sales_activity_date>$CUTOFF"
 
 # No sales activity ever
 --filter "!hs_last_sales_activity_date"
@@ -87,34 +102,38 @@ Dates use `YYYY-MM-DD`.
 
 ## Deal association
 
+`num_associated_deals` is a numeric rollup. The semantic meaning of "0", "≥1", "≥2" depends on the team's pipeline shape — don't assume "≥2 = upsell candidate" without confirming.
+
 ```bash
---filter "num_associated_deals>=1"   # has pipeline
---filter "num_associated_deals=0"    # net-new prospect
---filter "num_associated_deals>=2"   # upsell candidates
+--filter "num_associated_deals=0"
+--filter "num_associated_deals>=1"
+--filter "num_associated_deals>=2"
 ```
 
 ## Owner
 
 ```bash
---filter "hubspot_owner_id=12345"    # assigned to specific owner
---filter "!hubspot_owner_id"         # unassigned
---filter "hubspot_owner_id"          # any owner set
+--filter "hubspot_owner_id=<id>"   # assigned to specific owner
+--filter "!hubspot_owner_id"       # unassigned
+--filter "hubspot_owner_id"        # any owner set
 ```
 
 ## Combined AND in one --filter
 
+Examples below are illustrative shapes — the *threshold values* should come from the caller's definition of "stale," "engaged," etc.
+
 ```bash
-# MQLs with no owner and no deals (unworked)
+# MQLs with no owner and no deals
 --filter "lifecyclestage=marketingqualifiedlead AND !hubspot_owner_id AND num_associated_deals=0"
 
-# Opted-in US leads not contacted in 60 days
---filter "lifecyclestage=lead AND country=United States AND hs_email_optout!=true AND notes_last_contacted<2026-03-15"
+# Opted-in US leads not contacted since $CUTOFF
+--filter "lifecyclestage=lead AND country=United States AND hs_email_optout!=true AND notes_last_contacted<$CUTOFF"
 
-# SQLs with an open deal and recent sales activity
---filter "lifecyclestage=salesqualifiedlead AND num_associated_deals>=1 AND hs_last_sales_activity_date>2026-05-01"
+# SQLs with an open deal and recent sales activity (since $CUTOFF)
+--filter "lifecyclestage=salesqualifiedlead AND num_associated_deals>=1 AND hs_last_sales_activity_date>$CUTOFF"
 
-# Customers re-engaged on email
---filter "lifecyclestage=customer AND hs_email_last_open_date>2026-04-01 AND hs_email_optout!=true"
+# Customers who opened email since $CUTOFF
+--filter "lifecyclestage=customer AND hs_email_last_open_date>$CUTOFF AND hs_email_optout!=true"
 ```
 
 ## OR across --filter flags
@@ -122,7 +141,7 @@ Dates use `YYYY-MM-DD`.
 Each flag is a group; records matching any group are returned.
 
 ```bash
-# Top of funnel (leads OR MQLs)
+# Top-of-funnel union (leads OR MQLs)
 hubspot objects search --type contacts \
   --filter "lifecyclestage=lead" \
   --filter "lifecyclestage=marketingqualifiedlead"
@@ -133,12 +152,12 @@ hubspot objects search --type contacts \
   --filter "hs_lead_status=OPEN" \
   --filter "hs_lead_status=CONNECTED"
 
-# Engaged via email OR via sales touch
+# Engaged via email OR sales touch (since $CUTOFF)
 hubspot objects search --type contacts \
-  --filter "hs_email_last_open_date>2026-04-15" \
-  --filter "notes_last_contacted>2026-04-15"
+  --filter "hs_email_last_open_date>$CUTOFF" \
+  --filter "notes_last_contacted>$CUTOFF"
 
-# Never-contacted leads OR subscribers (nurture re-entry)
+# Never-contacted leads OR subscribers
 hubspot objects search --type contacts \
   --filter "lifecyclestage=lead AND !notes_last_contacted" \
   --filter "lifecyclestage=subscriber AND !notes_last_contacted"

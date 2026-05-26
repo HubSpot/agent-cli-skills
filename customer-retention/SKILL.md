@@ -26,15 +26,18 @@ Schema is portal-specific. Verify each property before filtering — e.g. `hubsp
 
 ## 1 — Find inactive customers
 
-```bash
-CUTOFF=$(date -v-60d +%Y-%m-%d 2>/dev/null || date -d '60 days ago' +%Y-%m-%d)
+What "inactive" means is team-specific — pick a cutoff based on the team's touch cadence (monthly check-ins? quarterly reviews?). Ask if the user hasn't said.
 
-# No outreach in 60d (calls/notes/meetings update notes_last_contacted)
+```bash
+# Substitute N for the cutoff the user/context justifies
+CUTOFF=$(date -v-${N}d +%Y-%m-%d 2>/dev/null || date -d "${N} days ago" +%Y-%m-%d)
+
+# No outreach since $CUTOFF (calls/notes/meetings update notes_last_contacted)
 hubspot objects search --type contacts \
   --filter "lifecyclestage=customer AND notes_last_contacted<$CUTOFF" \
   --properties email,firstname,notes_last_contacted,hubspot_owner_id
 
-# No sales activity in 60d (broader — also catches emails/tasks)
+# No sales activity since $CUTOFF (broader — also catches emails/tasks)
 hubspot objects search --type contacts \
   --filter "lifecyclestage=customer AND hs_last_sales_activity_date<$CUTOFF" \
   --properties email,firstname,hs_last_sales_activity_date
@@ -81,7 +84,9 @@ hubspot associations create --from tasks:$task_id --to contacts:<contact_id>
 Pipe a search through `jq` into one `objects create` call, then associate. Preview with `--dry-run` first (`bulk-operations` covers digest/confirm for >100 rows).
 
 ```bash
-DUE_MS=$(( ($(date +%s) + 2*86400) * 1000 ))   # due in 2 days
+# Pick DUE_DAYS based on the team's follow-up SLA (ask if unknown)
+DUE_DAYS=<N>   # substitute the number of days
+DUE_MS=$(( ($(date +%s) + DUE_DAYS*86400) * 1000 ))
 
 # 1. Capture the cohort (same file feeds both create + associate)
 hubspot objects search --type contacts \
