@@ -1,30 +1,10 @@
 {
-  "name": "Example Contact Flow — Set Lead Status on Lead Enrollment",
+  "name": "Example Contact Flow — Minimal Skeleton",
+  "description": "Smallest body that `hubspot workflows create` accepts. The structure here is verified against the v4 API; to add steps, copy real action objects from `hubspot workflows get <id>` rather than hand-writing them. See workflow-json-reference.md.",
   "type": "CONTACT_FLOW",
+  "flowType": "WORKFLOW",
   "isEnabled": false,
-  "enrollmentCriteria": {
-    "filterGroups": [
-      {
-        "filters": [
-          {
-            "property": "lifecyclestage",
-            "operation": {
-              "operationType": "ENUMERATION",
-              "operator": "IS_ANY_OF",
-              "values": ["lead"]
-            }
-          }
-        ]
-      }
-    ],
-    "type": "OR"
-  },
-  "actions": [
-    {
-      "type": "SET_CONTACT_PROPERTY",
-      "propertyName": "hs_lead_status",
-      "newValue": "IN_PROGRESS"
-    }
-  ],
+  "objectTypeId": "0-1",
+  "actions": [],
   "suppressionListIds": []
 }

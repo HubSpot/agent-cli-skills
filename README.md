@@ -2,7 +2,7 @@
 
 [![Install Skills](https://img.shields.io/badge/Install%20Skills-hubspot%2Fagent--cli--skills-blue)](https://skills.sh/hubspot/agent-cli-skills)
 
-Markdown skill files for AI agents (Claude Code, Cursor, Windsurf, and others) to use the `hubspot` CLI to accomplish CRM tasks.
+Markdown skill files for AI agents (Claude Code, Cursor, Windsurf, and others) to use the `hubspot` CLI to accomplish CRM tasks. The `hubspot` agent CLI is distinct from `hs`, the `@hubspot/cli` developer CLI for building apps, themes, and modules.
 
 ---
 
