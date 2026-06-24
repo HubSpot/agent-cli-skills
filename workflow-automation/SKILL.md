@@ -75,6 +75,8 @@ cat workflow.json | hubspot workflows create         # stdin also works
 
 Set `type` (`CONTACT_FLOW` or `PLATFORM_FLOW`), `flowType` (`WORKFLOW`), and `objectTypeId` (e.g. `0-1` for contacts) — all required on create. See `resources/workflow-json-reference.md` for the body shape and `resources/example-contact-flow.json` for the minimal template. **Easiest path: `get` an existing similar workflow as a starting template** rather than hand-writing the JSON.
 
+**Pitfall: `create --dry-run` does not validate the body.** It echoes the JSON back with `ok:true` and makes no API call — a green dry-run proves only that the input is well-formed JSON, not that it's a valid create (a body missing `type`/`flowType`/`objectTypeId`/`actions` still returns `ok:true`). The only real validation is the live `create`. By contrast, `update --dry-run` does reject a body missing required fields like `revisionId`.
+
 **Branching and convergence.** A `LIST_BRANCH` action forks the path on filter criteria; each branch — and the `defaultBranch` — carries a `connection` to the action it continues to. Because connections target actions by `nextActionId`, **branches can converge**: point two branches at the same `actionId` and both paths continue to one shared action, no duplication. See the branching section of `resources/workflow-json-reference.md` and `resources/example-branching-flow.json`.
 
 ## 4. Update — full PUT, get-modify-put round-trip
