@@ -15,6 +15,8 @@ hubspot workflows get <id> > workflow.json                              # copy i
 
 A real `get` gives you exact `actionTypeId`, `actionTypeVersion`, and `fields` values for every action — the parts this reference deliberately does not invent.
 
+**No workflow to copy from?** A brand-new portal has nothing to `get`, and there is no CLI command (and no public endpoint) that lists the built-in action types and their `fields`. The automation platform keeps such a catalog internally, but the `hubspot` CLI only does flow CRUD and doesn't surface it. So the reliable bootstrap is one UI round-trip: build the step(s) you need once in the HubSpot UI (Automations → a throwaway flow with the Set property / Delay / Create task / branch actions you're after), then `hubspot workflows get <id>` on it and lift the exact `actionTypeId` / `actionTypeVersion` / `fields` from its `actions[]`. Seed every shape once, then reuse from there.
+
 ---
 
 ## Top-Level Fields
