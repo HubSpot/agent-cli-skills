@@ -1,161 +1,152 @@
 # Workflow JSON Reference
 
-This document describes the structure of a HubSpot workflow (automation flow) JSON as returned by `hubspot workflows get <id>`. Use this as a reference when reading, editing, or creating workflow JSON files.
-
----
-
 ## Top-Level Fields
 
 | Field | Type | Writable | Notes |
 |---|---|---|---|
-| `id` | string | **read-only** | Workflow ID assigned by HubSpot |
-| `name` | string | yes | Display name of the workflow |
+| `name` | string | yes | Display name |
+| `description` | string | yes | Optional free text |
 | `type` | string | yes | `CONTACT_FLOW` (contacts) or `PLATFORM_FLOW` (deal, company, ticket, custom object) |
-| `isEnabled` | boolean | yes | `true` activates the workflow; `false` for drafts and templates |
-| `objectTypeId` | string | yes | Object type the flow enrolls (e.g. `0-1` contacts, `0-2` companies, `0-3` deals). Required for `PLATFORM_FLOW` |
-| `revisionId` | string | required on update | Returned by `get`; the API uses it for optimistic concurrency on PUT |
-| `createdAt` | string | **read-only** | Stripped before request on create/update |
-| `updatedAt` | string | **read-only** | Stripped before request on create/update |
-| `dataSources` | array | **read-only** | Stripped before request on create/update |
-| `enrollmentCriteria` | object | yes | Defines which contacts/records enroll (see below) |
-| `actions` | array | yes | Ordered list of actions the workflow executes (see below) |
+| `flowType` | string | yes | `WORKFLOW` for a standard workflow. Required on create |
+| `objectTypeId` | string | yes | Object type the flow enrolls — `0-1` contacts, `0-2` companies, `0-3` deals. Set it for `CONTACT_FLOW` (`0-1`) as well as `PLATFORM_FLOW` |
+| `isEnabled` | boolean | yes | `true` activates the flow; `false` for drafts and templates |
+| `actions` | array | yes | The flow's actions, wired as a graph — see below |
+| `startActionId` | string | yes | `actionId` of the first action to run |
+| `enrollmentCriteria` | object | yes | Which records enroll — a typed object, see below |
 | `suppressionListIds` | array | yes | List IDs whose members are excluded from enrollment |
+| `revisionId` | string | required on update | Returned by `get`; the API uses it for optimistic concurrency on PUT |
+| `id` | string | **read-only** | Workflow ID assigned by HubSpot |
+| `createdAt` / `updatedAt` | string | **read-only** | Stripped before request on create/update |
+| `dataSources` | array | **read-only** | Stripped before request on create/update |
+| `crmObjectCreationStatus` | string | **read-only** | Must read `COMPLETE` before an update PUT is accepted (provisioned asynchronously after create) |
+| `nextAvailableActionId` | integer | **read-only** | Counter the API maintains for assigning new action ids |
 
-### `type` Values
+The v4 spec marks a few more fields required (`blockedDates`, `canEnrollFromSalesforce`, `customProperties`, `timeWindows`, …), but the API fills defaults for them — the minimal body below creates successfully without them.
 
-| Value | Enrolls |
-|---|---|
-| `CONTACT_FLOW` | Contact records |
-| `PLATFORM_FLOW` | Company, deal, ticket, or other object records |
+**Minimal valid create body** (verified against the CLI acceptance test):
+
+```json
+{
+  "name": "My flow",
+  "type": "CONTACT_FLOW",
+  "flowType": "WORKFLOW",
+  "isEnabled": false,
+  "objectTypeId": "0-1",
+  "actions": []
+}
+```
+
+See `resources/example-contact-flow.json`.
+
+---
+
+## `actions` — a graph, not an ordered list
+
+`actions` is a **flat array of action objects wired into a graph**, not a sequential to-do list. Execution begins at `startActionId` and follows each action's `connection` to the next:
+
+- Every action has a string **`actionId`**, unique within the flow.
+- Most actions carry a **`connection`** to the next action:
+
+  ```json
+  "connection": { "edgeType": "STANDARD", "nextActionId": "2" }
+  ```
+
+  `edgeType` is `STANDARD` (continue to the next action) or `GOTO` (jump to an action defined elsewhere in the graph). `nextActionId` is the `actionId` to run next.
+- An action with no `connection` is terminal — the path ends there.
+
+Array position does not define order; the `connection` / `nextActionId` edges do.
+
+### `SINGLE_CONNECTION` — a standard step
+
+The common action shape: do one thing, then continue to one next action.
+
+```json
+{
+  "actionId": "2",
+  "type": "SINGLE_CONNECTION",
+  "actionTypeId": "<copy-from-a-real-get>",
+  "actionTypeVersion": 1,
+  "fields": {},
+  "connection": { "edgeType": "STANDARD", "nextActionId": "3" }
+}
+```
+
+`actionTypeId` + `actionTypeVersion` + `fields` are what make a step a "set property", "create task", "send email", and so on. Their exact values vary per action type and version — **copy them from a real `hubspot workflows get`** rather than guessing. Omit `connection` on the final step.
+
+### `LIST_BRANCH` — branch on a condition
+
+Forks the path on filter criteria. Each branch carries its own `connection` to whatever action it continues to:
+
+```json
+{
+  "actionId": "1",
+  "type": "LIST_BRANCH",
+  "listBranches": [
+    {
+      "branchName": "Connected leads",
+      "connection": { "edgeType": "STANDARD", "nextActionId": "2" },
+      "filterBranch": {
+        "filterBranchType": "OR",
+        "filterBranchOperator": "OR",
+        "filterBranches": [],
+        "filters": []
+      }
+    }
+  ],
+  "defaultBranchName": "Everyone else",
+  "defaultBranch": { "edgeType": "STANDARD", "nextActionId": "2" }
+}
+```
+
+- `listBranches[]` — one entry per condition; each has its own `connection` and `filterBranch`. The `filterBranch.filters[]` array holds the property conditions — copy those from a real `get`.
+- `defaultBranch` — the fall-through `connection` for records matching no branch.
+- A record travels **exactly one** branch.
+
+(Other branch action types exist, such as `AB_TEST_BRANCH`; `get` a real one to see its shape.)
+
+### Branching and convergence
+
+Because branches connect to downstream actions by `nextActionId`, **multiple branches can converge on the same action** — just point their `connection.nextActionId` at the same `actionId`. In the snippet above, the matching branch and `defaultBranch` both target action `"2"`, so both paths continue to one shared step. There is no duplication and no double-execution: the record runs `"2"` once, on whichever path it took. An `edgeType: "GOTO"` connection lets a branch jump to an action defined earlier in the graph (e.g. to rejoin a shared tail). See `resources/example-branching-flow.json`.
 
 ---
 
 ## `enrollmentCriteria`
 
-Controls which records enter the workflow. Uses a nested filter group structure with AND/OR logic.
+Controls which records enter the flow. It is **typed** — a `type` discriminator selects the shape. The common one is `LIST_BASED` (enroll records matching a filter):
 
 ```json
 "enrollmentCriteria": {
-  "filterGroups": [
-    {
-      "filters": [
-        {
-          "property": "lifecyclestage",
-          "operation": {
-            "operationType": "ENUMERATION",
-            "operator": "IS_ANY_OF",
-            "values": ["lead"]
-          }
-        }
-      ]
-    }
-  ],
-  "type": "OR"
+  "type": "LIST_BASED",
+  "listFilterBranch": {
+    "filterBranchType": "OR",
+    "filterBranchOperator": "OR",
+    "filterBranches": [],
+    "filters": []
+  },
+  "shouldReEnroll": false,
+  "unEnrollObjectsNotMeetingCriteria": false,
+  "reEnrollmentTriggersFilterBranches": []
 }
 ```
 
-- `filterGroups` — array of groups; records matching **any** group are enrolled (OR between groups)
-- `filters` within a group — records must match **all** filters to satisfy that group (AND within a group)
-- `operation.operationType` — common values: `ENUMERATION`, `STRING`, `NUMBER`, `BOOL`
-- `operation.operator` — common values: `IS_ANY_OF`, `IS_NONE_OF`, `EQ`, `NEQ`, `GT`, `LT`, `HAS_PROPERTY`, `NOT_HAS_PROPERTY`
+The other `type` values are `EVENT_BASED`, `MANUAL`, and `DATASET`. As with actions, copy a real `enrollmentCriteria` from `hubspot workflows get` to get the exact filter shape.
 
----
+## Filter branches
 
-## `actions` Array
-
-An ordered array of action objects. Each action has at minimum a `type` field.
-
-### Common Action Types
-
-#### `SET_CONTACT_PROPERTY`
-Sets a property value on the enrolled contact.
-
-```json
-{
-  "type": "SET_CONTACT_PROPERTY",
-  "propertyName": "hs_lead_status",
-  "newValue": "IN_PROGRESS"
-}
-```
-
-#### `SEND_EMAIL`
-Sends a marketing email. Requires the email ID from HubSpot's email tool.
-
-```json
-{
-  "type": "SEND_EMAIL",
-  "emailId": 12345
-}
-```
-
-#### `CREATE_TASK`
-Creates a CRM task assigned to the contact owner.
-
-```json
-{
-  "type": "CREATE_TASK",
-  "subject": "Follow up with lead",
-  "taskType": "CALL",
-  "dueDate": {
-    "delayMillis": 86400000
-  }
-}
-```
-
-#### `DELAY`
-Pauses execution for a fixed duration before the next action.
-
-```json
-{
-  "type": "DELAY",
-  "delayMillis": 86400000
-}
-```
-
-`delayMillis` is milliseconds. Common values: `3600000` (1 hour), `86400000` (1 day), `604800000` (7 days).
-
-#### `BRANCH`
-Forks the workflow based on a condition. Each branch has its own `actions` array.
-
-```json
-{
-  "type": "BRANCH",
-  "filterBranches": [
-    {
-      "filterBranchType": "OR",
-      "filters": [
-        {
-          "property": "hs_lead_status",
-          "operation": {
-            "operationType": "ENUMERATION",
-            "operator": "IS_ANY_OF",
-            "values": ["CONNECTED"]
-          }
-        }
-      ],
-      "actions": []
-    }
-  ],
-  "defaultBranchActions": []
-}
-```
-
----
+Both branch conditions and list-based enrollment use a **filter branch** object: `filterBranchType` (`OR` / `AND` / …), `filterBranchOperator`, a nested `filterBranches[]` array, and a `filters[]` array of property conditions. The exact `filters[]` item shape (property name, operator, values) is best taken verbatim from a real flow.
 
 ## `suppressionListIds`
 
-An array of HubSpot list IDs. Contacts on any of these lists will not enroll even if they match `enrollmentCriteria`.
-
-```json
-"suppressionListIds": [101, 202]
-```
-
-Use an empty array `[]` if no suppression lists are needed.
+An array of HubSpot list IDs. Records on any of these lists will not enroll even if they match `enrollmentCriteria`. Use `[]` if none are needed.
 
 ---
 
-## Key Rules
+## Update — full PUT, get-modify-put round-trip
 
-See `SKILL.md` for the authoritative command patterns. One non-obvious consequence worth noting here:
+Update is a **full replace**, not a patch:
 
-**Partial edits silently corrupt workflows.** Because update is a full PUT, sending only an `actions` array without `enrollmentCriteria` will clear the enrollment trigger entirely — no error, no warning. Always start from the full `get` response.
+- Include `revisionId` (from `get`) — the API uses it for optimistic concurrency.
+- Read-only fields (`createdAt`, `updatedAt`, `dataSources`) are stripped automatically by the CLI.
+- `crmObjectCreationStatus` must read `COMPLETE` before a PUT is accepted; right after create it may still be provisioning, so re-`get` until it does.
+
+**Pitfall — partial bodies silently drop fields.** Because update is a full PUT, sending only an `actions` array without `enrollmentCriteria` clears the enrollment trigger entirely — no error, no warning. Always start from the full `get` response.

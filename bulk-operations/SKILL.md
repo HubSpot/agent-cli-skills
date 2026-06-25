@@ -21,7 +21,7 @@ triggers:
 
 ## Source of truth
 
-`hubspot <command> --help` is authoritative. If anything in this file contradicts `--help`, trust `--help` and tell the user. Run `hubspot objects types` once at the start of a session to see what object types exist in this portal (standard + custom).
+This is the `hubspot` agent CLI; the `hs` developer CLI (`@hubspot/cli`) is a different tool and does not manage CRM data or workflows. `hubspot <command> --help` is authoritative. If anything in this file contradicts `--help`, trust `--help` and tell the user. Run `hubspot objects types` once at the start of a session to see what object types exist in this portal (standard + custom).
 
 ## Output shape
 

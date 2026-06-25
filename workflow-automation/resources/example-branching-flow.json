@@ -1,0 +1,46 @@
+{
+  "name": "Example Branching Flow — Two Paths Converging on One Action",
+  "description": "Demonstrates branch CONVERGENCE in the v4 graph: the matching branch and the default branch both set connection.nextActionId to action \"2\", so both paths continue to the same shared downstream action — no duplication needed. The branch's actionTypeId/actionTypeVersion/fields and the filter conditions are ILLUSTRATIVE placeholders; replace them with values copied from a real `hubspot workflows get` (as written, this body will not create). See workflow-json-reference.md.",
+  "type": "CONTACT_FLOW",
+  "flowType": "WORKFLOW",
+  "isEnabled": false,
+  "objectTypeId": "0-1",
+  "startActionId": "1",
+  "actions": [
+    {
+      "actionId": "1",
+      "type": "LIST_BRANCH",
+      "listBranches": [
+        {
+          "branchName": "Connected leads",
+          "connection": { "edgeType": "STANDARD", "nextActionId": "2" },
+          "filterBranch": {
+            "filterBranchType": "OR",
+            "filterBranchOperator": "OR",
+            "filterBranches": [],
+            "filters": [
+              {
+                "property": "hs_lead_status",
+                "operation": {
+                  "operationType": "ENUMERATION",
+                  "operator": "IS_ANY_OF",
+                  "values": ["CONNECTED"]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "defaultBranchName": "Everyone else",
+      "defaultBranch": { "edgeType": "STANDARD", "nextActionId": "2" }
+    },
+    {
+      "actionId": "2",
+      "type": "SINGLE_CONNECTION",
+      "actionTypeId": "<copy-from-a-real-get>",
+      "actionTypeVersion": 1,
+      "fields": {}
+    }
+  ],
+  "suppressionListIds": []
+}
