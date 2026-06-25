@@ -73,7 +73,7 @@ hubspot workflows create --file workflow.json
 cat workflow.json | hubspot workflows create         # stdin also works
 ```
 
-Set `type` (`CONTACT_FLOW` or `PLATFORM_FLOW`), `flowType` (`WORKFLOW`), and `objectTypeId` (e.g. `0-1` for contacts) — all required on create. See `resources/workflow-json-reference.md` for the body shape and `resources/example-contact-flow.json` for the minimal template. **Easiest path: `get` an existing similar workflow as a starting template** rather than hand-writing the JSON. On a fresh portal with nothing to copy, build the steps once in the UI then `get` that flow — there is no CLI command to list action types (see the "No workflow to copy from?" note in `resources/workflow-json-reference.md`).
+Set `type` (`CONTACT_FLOW` or `PLATFORM_FLOW`), `flowType` (`WORKFLOW`), and `objectTypeId` (e.g. `0-1` for contacts) — all required on create. See `resources/workflow-json-reference.md` for the body shape and `resources/example-contact-flow.json` for the minimal template. **Easiest path: `get` an existing similar workflow as a starting template** rather than hand-writing the JSON.
 
 **Pitfall: `create --dry-run` does not validate the body.** It echoes the JSON back with `ok:true` and makes no API call — a green dry-run proves only that the input is well-formed JSON, not that it's a valid create (a body missing `type`/`flowType`/`objectTypeId`/`actions` still returns `ok:true`). The only real validation is the live `create`. By contrast, `update --dry-run` does reject a body missing required fields like `revisionId`.
 

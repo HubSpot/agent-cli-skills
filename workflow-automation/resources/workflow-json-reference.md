@@ -1,24 +1,5 @@
 # Workflow JSON Reference
 
-This describes the body of a HubSpot automation flow as used by `hubspot workflows get`, `create`, and `update`. Those commands call the public `/automation/v4/flows` API and pass the JSON straight through, so this body **is** the v4 flow shape.
-
-> **What's verified here.** The structure below is grounded in HubSpot's public Automation V4 OpenAPI spec and the `hubspot` CLI's own acceptance test. What is **not** verified here is the exact `actionTypeId` / `fields` for each concrete action (a "set property" vs a "create task" step, etc.) — those are specific to each action type and version. Get them by copying a real action (next section), not from this doc.
-
-## Start from a real workflow
-
-The most reliable way to author a flow is to **`get` an existing one and modify it** — don't hand-write the JSON from scratch:
-
-```bash
-hubspot workflows list | jq -c 'select(.name | test("welcome"; "i"))'   # find a similar flow
-hubspot workflows get <id> > workflow.json                              # copy its real shape
-```
-
-A real `get` gives you exact `actionTypeId`, `actionTypeVersion`, and `fields` values for every action — the parts this reference deliberately does not invent.
-
-**No workflow to copy from?** A brand-new portal has nothing to `get`, and there is no CLI command (and no public endpoint) that lists the built-in action types and their `fields`. The automation platform keeps such a catalog internally, but the `hubspot` CLI only does flow CRUD and doesn't surface it. So the reliable bootstrap is one UI round-trip: build the step(s) you need once in the HubSpot UI (Automations → a throwaway flow with the Set property / Delay / Create task / branch actions you're after), then `hubspot workflows get <id>` on it and lift the exact `actionTypeId` / `actionTypeVersion` / `fields` from its `actions[]`. Seed every shape once, then reuse from there.
-
----
-
 ## Top-Level Fields
 
 | Field | Type | Writable | Notes |
