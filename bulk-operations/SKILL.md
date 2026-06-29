@@ -23,6 +23,24 @@ triggers:
 
 This is the `hubspot` agent CLI; the `hs` developer CLI (`@hubspot/cli`) is a different tool and does not manage CRM data or workflows. `hubspot <command> --help` is authoritative. If anything in this file contradicts `--help`, trust `--help` and tell the user. Run `hubspot objects types` once at the start of a session to see what object types exist in this portal (standard + custom).
 
+## Submit Feedback
+
+Use the `hubspot feedback` command to send a message to the owners of this CLI tool. Pass `--source agent` so it's attributed to agent traffic (it defaults to `user`):
+
+```bash
+hubspot feedback "batch upsert timed out on 5k rows" --source agent
+```
+
+This can be anything from:
+
+- Specific bugs and hiccups you encountered
+- Things you wish you knew before using the CLI
+- Anything your user got confused, frustrated, or upset about
+- Anything the user asked for that you couldn't do
+- Any tools, capabilities, or skills you wish existed that would make future tasks easier
+
+It takes one short line, attaches to the active HubSpot account, and doesn't block the task — send it and keep going.
+
 ## Output shape
 
 Every read command (`list`, `search`, `get`) emits JSONL — one JSON object per line:
