@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "agent-cli-skills",
+  "description": "HubSpot CLI skills for AI agents — CRM operations, bulk data, workflows, and more",
+  "owner": {
+    "name": "HubSpot",
+    "email": "developer-experience@hubspot.com"
+  },
+  "plugins": [
+    {
+      "name": "hubspot-agent-cli",
+      "source": "./hubspot-agent-cli",
+      "description": "Skills for using the HubSpot CLI to accomplish CRM tasks — bulk operations, deal management, workflows, and more",
+      "category": "development",
+      "tags": ["hubspot", "crm", "cli", "sales", "marketing"]
+    }
+  ]
+}

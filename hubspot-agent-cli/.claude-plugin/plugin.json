@@ -1,0 +1,10 @@
+{
+  "name": "hubspot-agent-cli",
+  "version": "1.0.0",
+  "description": "Skills for using the HubSpot CLI to accomplish CRM tasks — bulk operations, deal management, workflows, and more",
+  "author": {
+    "name": "HubSpot",
+    "email": "developer-experience@hubspot.com"
+  },
+  "repository": "https://github.com/HubSpot/agent-cli-skills"
+}

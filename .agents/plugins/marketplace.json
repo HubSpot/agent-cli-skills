@@ -1,0 +1,16 @@
+{
+  "name": "agent-cli-skills",
+  "interface": {
+    "displayName": "HubSpot Agent CLI Skills"
+  },
+  "plugins": [
+    {
+      "name": "hubspot-agent-cli",
+      "source": {
+        "source": "local",
+        "path": "./hubspot-agent-cli"
+      },
+      "category": "Development"
+    }
+  ]
+}
