@@ -1,21 +1,65 @@
 # HubSpot Agent CLI Skills
 
-[![Install Skills](https://img.shields.io/badge/Install%20Skills-hubspot%2Fagent--cli--skills-blue)](https://skills.sh/hubspot/agent-cli-skills)
-
 Markdown skill files for AI agents (Claude Code, Cursor, Windsurf, and others) to use the `hubspot` CLI to accomplish CRM tasks. The `hubspot` agent CLI is distinct from `hs`, the `@hubspot/cli` developer CLI for building apps, themes, and modules.
 
 ---
 
 ## Installation
 
+### Claude Code plugin (recommended)
+
+Add the marketplace, then install the plugin:
+
+```
+/plugin marketplace add HubSpot/agent-cli-skills
+/plugin install hubspot-agent-cli@agent-cli-skills
+```
+
+The plugin auto-installs the `hubspot` CLI on session start. If that fails
+(e.g. in a cloud session without network access), run
+`/hubspot-agent-cli:hubspot-setup` for manual instructions.
+
+### Claude Cowork / cloud sessions
+
+To use the plugin in a Claude Cowork or cloud session, add the following to
+the target repo's `.claude/settings.json`:
+
+```json
+{
+  "enabledPlugins": {
+    "hubspot-agent-cli@agent-cli-skills": true
+  },
+  "extraKnownMarketplaces": {
+    "agent-cli-skills": {
+      "source": {
+        "source": "github",
+        "repo": "HubSpot/agent-cli-skills"
+      }
+    }
+  }
+}
+```
+
+Then allowlist the HubSpot install hosts in your cloud environment's
+network-access settings (Custom mode):
+
+```
+install.hubspot.com
+api.hubapi.com
+```
+
+### Copy skills directly
+
+To install skills into your project's `.claude/skills/` directory instead:
+
 ```bash
 npx skills hubspot/agent-cli-skills
 ```
 
-This installs all skills into your project's `.claude/skills/` directory. To install a single skill:
+To install a single skill:
 
 ```bash
-npx skills hubspot/agent-cli-skills/bulk-operations
+npx skills hubspot/agent-cli-skills/hubspot-agent-cli/skills/bulk-operations
 ```
 
 ---
@@ -26,6 +70,7 @@ npx skills hubspot/agent-cli-skills/bulk-operations
 
 | Skill | Description |
 |---|---|
+| `hubspot-setup` | Install and configure the HubSpot CLI (runs automatically on session start) |
 | `bulk-operations` | Foundation: JSONL pipes, batch read, pagination, dry-run/digest/confirm for destructive ops, `hubspot history` recovery |
 | `audience-targeting` | Build targeted contact segments by filtering on lifecycle stage, engagement, and firmographics |
 | `communication-history` | Retrieve activity history for CRM records and assemble pre-call research briefs |
