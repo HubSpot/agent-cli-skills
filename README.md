@@ -48,6 +48,21 @@ install.hubspot.com
 api.hubapi.com
 ```
 
+### Codex CLI
+
+Add the marketplace and install the plugin:
+
+```
+/plugin marketplace add HubSpot/agent-cli-skills
+/plugin install hubspot-agent-cli
+```
+
+Then install the CLI manually:
+
+```bash
+curl -fsSL https://install.hubspot.com | sh
+```
+
 ### Copy skills directly
 
 To install skills into your project's `.claude/skills/` directory instead:
