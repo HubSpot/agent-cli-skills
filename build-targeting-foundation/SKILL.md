@@ -154,34 +154,59 @@ jq -c '{id}' /tmp/candidates.jsonl \
 
 ## Step 5 — Create or update segments
 
-Segments (CRM lists) are managed via `hubspot crm segments` (DPG2-93). If that command group is available:
+Segments (CRM lists) are managed via `hubspot segments` (alias: `hubspot lists`).
 
 ```bash
 # Discover available segment commands
-hubspot crm segments --help
+hubspot segments --help
 
-# List existing segments (find one to update, or confirm name doesn't conflict)
-hubspot crm segments list
-
-# Create a dynamic segment filtered to target accounts in an industry
-hubspot crm segments create \
-  --name "Target Accounts - SaaS 200-2000 employees" \
-  --type DYNAMIC \
-  --filter "hs_is_target_account=true AND industry=SOFTWARE"
-
-# Or create a static segment with the confirmed company IDs
-hubspot crm segments create \
-  --name "Target Accounts - Q3 2026" \
-  --type STATIC \
-  --members "$(jq -r '.id' /tmp/confirmed_targets.jsonl | paste -sd',')"
+# List existing segments (confirm name doesn't already exist)
+hubspot segments list
 ```
 
-If `hubspot crm segments` is not yet available in the installed CLI version, document the segment definition as a filter expression for the user to create via the HubSpot UI, and include it in the output. Dry-run / preview output for segment changes where `--dry-run` is supported.
+**Before creating, show the user a human-readable summary of what the segment will contain** — the ICP filter expression and an enriched preview table (name, domain, employee count) from Step 3. Never ask the user to approve a dry-run that only shows raw object IDs; they cannot verify intent from IDs alone.
+
+```bash
+# Show enriched preview for human confirmation
+echo "Segment: Q3 2026 Target Accounts (STATIC, companies)"
+echo "Filter: <ICP filter expression used in Step 3>"
+jq -r '[.properties.name, .properties.domain, .properties.numberofemployees] | @tsv' \
+  /tmp/confirmed_targets.jsonl | column -t
+echo "Total: $(wc -l < /tmp/confirmed_targets.jsonl) companies"
+```
+
+After confirmation, create the segment using the **ICP filter expression** (not a raw ID list) so the segment's intent is visible to anyone who inspects it in the HubSpot UI. Use `--list-type STATIC` for a point-in-time snapshot, `--list-type ACTIVE` for a live-updating list.
+
+```bash
+# Static snapshot — membership frozen at creation time
+hubspot segments create \
+  --name "Target Accounts - Q3 2026" \
+  --type "0-2" \
+  --list-type STATIC \
+  --filter "<ICP filter expression from Step 3>" \
+  --dry-run
+
+# Apply after confirmation
+hubspot segments create \
+  --name "Target Accounts - Q3 2026" \
+  --type "0-2" \
+  --list-type STATIC \
+  --filter "<ICP filter expression from Step 3>"
+
+# Active / auto-updating — re-evaluates as properties change
+hubspot segments create \
+  --name "Target Accounts - SaaS 100-1000 employees" \
+  --type "0-2" \
+  --list-type ACTIVE \
+  --filter "hs_is_target_account=true AND industry=COMPUTER_SOFTWARE"
+```
+
+If `hubspot segments` is not available in the installed CLI version, document the filter expression for the user to create the segment via the HubSpot UI (Contacts → Lists → Create list), and include it in the output.
 
 Readback:
 
 ```bash
-hubspot crm segments list | jq -c 'select(.name | test("Target Accounts"; "i"))'
+hubspot segments list | jq -c 'select(.name | test("Target Accounts"; "i"))'
 ```
 
 ## Step 6 — Associate contacts to target-account companies
