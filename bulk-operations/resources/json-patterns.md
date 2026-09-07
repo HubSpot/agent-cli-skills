@@ -51,8 +51,9 @@ hubspot objects search --type contacts --filter "company~acme" \
 
 ```bash
 # Companies with revenue > 1M
+# Numeric CRM props can be null OR "" (empty string) when blank; guard the empty string too before tonumber.
 hubspot objects list --type companies \
-| jq -c 'select((.properties.annualrevenue // "0") | tonumber > 1000000)'
+| jq -c 'select(.properties.annualrevenue != null and .properties.annualrevenue != "" and ((.properties.annualrevenue | tonumber) > 1000000))'
 
 # Exclude obvious junk emails (server-side ~ is whole-token only)
 hubspot objects list --type contacts \
