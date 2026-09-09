@@ -47,6 +47,8 @@ hubspot objects search --type contacts \
 
 For more signals (email opt-out, stale tickets, no open deals) see `resources/customer-health-signals.md`. For >100 hits, use the pagination loop from `bulk-operations`.
 
+To audit *why* a customer churned or moved stage — which workflow, integration, import, or UI edit last changed `lifecyclestage` — use `hubspot objects history --type contacts --properties lifecyclestage [--id <recordId>] [--include-ui]`. It flattens each property's source history into one row per change.
+
 ## 2 — Flag at-risk subscriptions
 
 `subscriptions` is a standard object (`hubspot objects types` confirms). Enum values for `hs_subscription_status` are portal-specific — verify before filtering, then plug the exact value in:
@@ -114,5 +116,5 @@ One CLI call for the search, one for the create, then N for associations — no 
 ## Known gaps
 
 - No native churn-score / health-score property — track via a custom property.
-- No Lists API, no sequences/cadences API — re-engagement enrollment is not CLI-available.
+- `hubspot segments` provides CRM lists for re-engagement cohorts — `segments members-list` pulls a list's members, and `segments create` / `update-filters` save an at-risk audience as a reusable list. Re-engagement enrollment can be built as a workflow via `hubspot workflows create` / `update` (see `workflow-automation/SKILL.md`). No sequences/cadences API in the current CLI surface.
 - `hubspot associations create` does not batch — one CLI call per pair.
