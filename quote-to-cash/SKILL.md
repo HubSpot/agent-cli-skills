@@ -118,7 +118,7 @@ hubspot objects search --type subscriptions \
 # Sum MRR across active subs
 hubspot objects search --type subscriptions \
   --filter "hs_subscription_status=<active-value>" --format json \
-  | jq '[.data[].properties.hs_mrr | select(. != null) | tonumber] | add'
+  | jq '[.data[].properties.hs_mrr | select(. != null and . != "") | tonumber] | add // 0'
 ```
 
 ## Known constraints
