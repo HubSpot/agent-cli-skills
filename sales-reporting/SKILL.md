@@ -21,10 +21,11 @@ triggers:
 ## Property and output shape notes
 
 - All CRM property values come back as **strings** in JSONL — booleans included. `hs_is_closed_won` is returned as `"true"`/`"false"` (string); `amount` is a numeric string. Use `tonumber` for arithmetic; compare booleans as strings (`== "true"`) when filtering client-side.
+- **Numeric properties can be `null` *or* an empty string (`""`)** when unset/blank. `tonumber` aborts on `""`. Always guard with `select(. != null and . != "") | tonumber`.
 - In `--filter` expressions, `hs_is_closed_won=true` and `hs_is_closed!=true` work — the API parses the value.
 - `--properties` returns the standard nested shape: `{"id":"123","properties":{"amount":"5000","dealname":"..."}}`. Reference fields as `.properties.amount` in jq.
-- Stage IDs in `dealstage` are portal-specific. Map them with `hubspot pipelines stages --type deals --pipeline <id>`.
-- `hubspot_owner_id` is a numeric string. Resolve to a name with `hubspot owners list` (fields: `id`, `firstName`, `lastName`, `email`).
+- Stage IDs in `dealstage` are portal-specific. Map them with `hubspot pipelines stages --type deals --pipeline <id>`. **`hubspot pipelines` is app-token-only** — see Auth section; it 403s under user OAuth.
+- `hubspot_owner_id` is a numeric string. Resolve to a name with `hubspot owners list` (fields: `id`, `firstName`, `lastName`, `email`). **`hubspot owners list` is app-token-only** — see Auth section; it 403s under user oauth.
 
 ## 1. Daily briefing
 
@@ -53,7 +54,7 @@ hubspot objects search --type deals \
 **Open-pipeline summary line:**
 ```bash
 hubspot objects search --type deals --filter "hs_is_closed!=true" --properties amount \
-| jq -rs '{count: length, value: ([.[].properties.amount | select(. != null) | tonumber] | add // 0 | round)}
+| jq -rs '{count: length, value: ([.[].properties.amount | select(. != null and . != "") | tonumber] | add // 0 | round)}
           | "Open pipeline: \(.count) deals, $\(.value)"'
 ```
 
@@ -66,7 +67,7 @@ hubspot objects search --type deals --filter "hs_is_closed!=true" \
 | jq -rs '
     group_by(.properties.dealstage)
     | map({stage: .[0].properties.dealstage, count: length,
-           total: ([.[].properties.amount | select(. != null) | tonumber] | add // 0 | round)})
+           total: ([.[].properties.amount | select(. != null and . != "") | tonumber] | add // 0 | round)})
     | sort_by(-.total) | .[] | "\(.stage)\tcount: \(.count)\tvalue: $\(.total)"' \
 | column -t -s$'\t'
 ```
@@ -78,13 +79,14 @@ hubspot objects search --type deals --filter "hs_is_closed!=true" \
 | jq -rs '
     group_by(.properties.hubspot_owner_id)
     | map({owner: .[0].properties.hubspot_owner_id, count: length,
-           total: ([.[].properties.amount | select(. != null) | tonumber] | add // 0 | round)})
+           total: ([.[].properties.amount | select(. != null and . != "") | tonumber] | add // 0 | round)})
     | sort_by(-.total) | .[] | "owner \(.owner)\tdeals: \(.count)\tvalue: $\(.total)"' \
 | column -t -s$'\t'
 ```
 
-To label owner IDs with names, dump the owners file once and join:
+To label owner IDs with names, dump the owners file once and join. This needs a service key — see Known limitations:
 ```bash
+export HUBSPOT_ACCESS_TOKEN=<service-key>
 hubspot owners list | jq -r '"\(.id)\t\(.firstName) \(.lastName) <\(.email)>"' > /tmp/owners.tsv
 ```
 
@@ -114,7 +116,7 @@ hubspot objects search --type deals \
            total: length,
            won: ([.[] | select(.properties.hs_is_closed_won == "true")] | length),
            won_value: ([.[] | select(.properties.hs_is_closed_won == "true")
-                       | .properties.amount | select(. != null) | tonumber] | add // 0 | round)})
+                       | .properties.amount | select(. != null and . != "") | tonumber] | add // 0 | round)})
     | map(. + {win_rate: ((.won / .total * 100) | round)})
     | sort_by(-.won_value)
     | .[] | "owner \(.owner)\twon: \(.won)/\(.total)\trate: \(.win_rate)%\twon: $\(.won_value)"' \
@@ -129,7 +131,7 @@ hubspot objects search --type deals \
 | jq -rs '
     group_by(.properties.closedate[0:7])
     | map({month: .[0].properties.closedate[0:7], count: length,
-           revenue: ([.[].properties.amount | select(. != null) | tonumber] | add // 0 | round)})
+           revenue: ([.[].properties.amount | select(. != null and . != "") | tonumber] | add // 0 | round)})
     | sort_by(.month) | .[] | "\(.month)\tdeals: \(.count)\trevenue: $\(.revenue)"' \
 | column -t -s$'\t'
 ```
@@ -138,3 +140,5 @@ hubspot objects search --type deals \
 
 - `hubspot pipelines stages` does not expose stage probability — won/lost stages can't be auto-identified from the stages list. Use `hs_is_closed_won` on deals instead.
 - No team object — group by `hubspot_owner_id` and resolve names from `hubspot owners list` client-side.
+- `hubspot owners list` and `hubspot pipelines` are app-token-only and 403 under user OAuth. Keep raw IDs + warn; do not fail the report.
+- Numeric CRM properties can be `null` or `""`; always guard `tonumber` with `select(. != null and . != "")`.
