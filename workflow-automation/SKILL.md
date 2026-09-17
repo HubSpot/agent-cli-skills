@@ -39,6 +39,15 @@ If anything here ever drifts, `hubspot workflows --help` and `hs --help` are aut
 
 `hubspot workflows --help` lists five subcommands: `list`, `get`, `create`, `update`, `delete`. There is **no `search`** — finding by name is `list | jq`. For JSONL piping, pagination, and destructive dry-run/digest/confirm patterns, this skill builds on `bulk-operations/SKILL.md` — re-read that first.
 
+## Auth — service key required
+
+**Every `hubspot workflows` command requires `HUBSPOT_ACCESS_TOKEN` (a service key).** None of them work under `hubspot auth login` (user OAuth) — the CLI rejects them up front with `This endpoint does not support user-level OAuth tokens`. The `automation` scope the v4 flows API needs is not available to the CLI's user-level OAuth app, so set a service key before running anything in this skill:
+
+```bash
+export HUBSPOT_ACCESS_TOKEN=<service-key>   # create at Settings → Integrations → Service keys
+hubspot workflows list
+```
+
 ## 1. List + find by name
 
 ```bash
@@ -114,5 +123,5 @@ The dry-run output includes an `apply_command_hint` — copy the exact confirm s
 ## Known limitations
 
 - No `hubspot workflows search` — `list | jq` is the workaround.
-- No Lists API in the CLI — list-membership enrollment triggers must be wired up in the UI.
+- `hubspot segments` provides CRM lists (`list`, `get`, `create`, `update`, `update-filters`, `delete`, `restore`, `members-list` / `members-add` / `members-remove`). List-membership enrollment triggers are part of the workflow body (`enrollmentCriteria`), so configure them through `hubspot workflows create` / `update` — get the list ID with `hubspot segments list` / `get` and copy the `enrollmentCriteria` shape from a real `workflows get` (see `resources/workflow-json-reference.md`). No UI step required.
 - No sequences/cadences API. `dataSources` is read-only — cannot be rewired via update.
