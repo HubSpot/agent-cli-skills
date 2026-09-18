@@ -118,4 +118,4 @@ For >100 rows, apply the dry-run / digest / confirm pattern from `bulk-operation
 
 ## Known constraints
 
-Activities must be associated immediately or they're invisible in the CRM UI. `properties get` doesn't return enum option values for activity types — use the reference. No sequences/cadences in the CLI.
+Activities must be associated immediately or they're invisible in the CRM UI. `properties get` doesn't return enum option values for activity types — use the reference. Sales Hub sequences are read-only in the CLI (`hubspot sequences list` / `get` / `enrollments`, `automation.sequences.read` scope) — the CLI cannot enroll a contact in a sequence, so drive outreach via tasks/activities above. This surface grows; recheck `hubspot --help` / `CHANGELOG.md` before assuming an API is missing.
