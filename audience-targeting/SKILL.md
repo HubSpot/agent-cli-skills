@@ -108,9 +108,16 @@ jq -c '{id}' segments/opted_in_leads.jsonl \
 
 Destructive ops on a saved segment follow the dry-run → digest → confirm flow in `bulk-operations/SKILL.md`.
 
+## Save as a HubSpot list or view
+
+A JSONL segment is portable, but you can also persist an audience in HubSpot:
+
+- **List** — `hubspot segments create` saves a list; `segments get` / `list` inspect it; `segments members-list` reads members; `segments members-add` / `members-remove` manage membership. Use `segments update-filters` to set a dynamic list's filter criteria.
+- **View** — `hubspot views create --type <t> --name "..." --columns a,b [--filters-file filters.json] [--sort prop:asc]` saves a filter set as a reusable object view; `views list` / `get` / `update` / `replace-field` / `delete` manage it.
+- **Size it first** — `hubspot objects count --type contacts --filter "..."` returns `{"object_type":"contacts","total":N}` without paging, so you can size an audience before saving or exporting it.
+
 ## Known limits
 
-- No Lists API surface. Can't save as a HubSpot list or filter by list membership.
 - `~` is token-match, not substring. No regex operator.
 - `properties get` does not return enum options — discover via `objects list` + `jq`.
 - `associations list` has no batch `--from`. Loop to gather IDs, batch the downstream `objects get`.
