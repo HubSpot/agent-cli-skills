@@ -177,4 +177,4 @@ Win/loss analysis (close reasons, win rate, ARR roll-up) is in the `sales-report
 - Bulk MQL → deal needs a two-pass shell flow: associations must be built from `objects create` output, not in the same pipe.
 - `lifecyclestage` is forward-only in most portal settings — backward transitions may be rejected.
 - `closedate` is a date string (`YYYY-MM-DD`). Datetime activity props (`hs_last_activity_date`) also accept a date string for `<`/`>` comparisons.
-- No sequences/cadences API in the CLI — create a follow-up task via `sales-execution` instead.
+- `hubspot sequences` reads Sales Hub sequences (`list` / `get` / `enrollments`) but is read-only — the CLI cannot enroll a contact in a sequence, so create a follow-up task via `sales-execution` instead. `sequences enrollments <contact_id>` is useful for win/loss context on a deal's contacts.
