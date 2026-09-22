@@ -74,7 +74,7 @@ A single `hubspot objects get` reads up to ~100 IDs per call via the batch endpo
 
 ## Bulk flow: paginate first, then reshape, then write
 
-When operating on all records of a type (or all matches of a filter), **always start with `pagination-loop.sh`** — never run a bare `list` or `search` to "check how many there are." A bare call returns at most 100 records and you will have to re-fetch them anyway.
+When operating on all records of a type (or all matches of a filter), **always start with `pagination-loop.sh`** — never run a bare `list` or `search` to "check how many there are." A bare call returns at most 100 records and you will have to re-fetch them anyway. To size the job first, use `hubspot objects count --type <t> [--filter "..."]`, which returns the total matching count (e.g. `{"object_type":"contacts","total":42}`) without paging.
 
 The canonical bulk pattern is:
 
@@ -167,6 +167,8 @@ hubspot history --since 7d --kind MetadataDestroy # schema deletes
 
 `history` does not currently restore records — it's an audit log. If you deleted something by mistake, capture the history line and tell the user to restore via the UI.
 
+For CRM property *source* history (who or what changed a property — `WORKFLOW`, `INTEGRATION`, `IMPORT`, `CRM_UI`), use `hubspot objects history --type <t> --properties <p>`. It flattens each property's version history into one row per change; UI-driven (`CRM_UI`) changes are excluded by default (`--include-ui` to keep them). Add `--id <recordId>` to read one record, or omit it to scan a page. This is separate from the local `hubspot history` audit log above — use it to investigate why a property changed after a bulk op.
+
 ## Upsert beats search-then-create
 
 For "create if missing, update if present" (the enrichment pattern), use `upsert` — one CLI call per record, no race condition:
@@ -206,4 +208,6 @@ hubspot objects search --type contacts --filter "!email" \
 
 - Some destructive operations may be blocked under user-OAuth (browser login); set `HUBSPOT_ACCESS_TOKEN` (private app token) when running deletes if the CLI returns a permission error.
 - `hubspot owners list` returns CRM users; there is no `teams` object. For team-level operations, group by `hubspot_owner_id` client-side.
-- No Lists API, no sequences/cadences API in the current CLI surface.
+- `hubspot segments` provides CRM lists (Lists API): `list`, `get`, `create`, `update` (metadata), `update-filters`, `delete`, `restore`, and `members-list` / `members-add` / `members-remove`.
+- `hubspot sequences` provides read-only access to Sales Hub sequences: `list --user-id <id>` (paginated, `--name` filter), `get <id> --user-id <id>` (steps + settings), and `enrollments <contact_id>` (a contact's enrollment history). Sequences are a product API surface (Sales Hub Professional+, `automation.sequences.read` scope), not a CRM object type — `objects list --type sequences` does not work, and there is no create/update/delete/enroll.
+- **Maintaining this section:** the command surface grows — do not assume an API is absent because it was when this was written. When a new command family ships (see `CHANGELOG.md`), revisit these constraints. `hubspot --help` is authoritative for what exists today.
