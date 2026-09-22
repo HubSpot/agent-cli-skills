@@ -86,6 +86,21 @@ hubspot associations list --from contacts:149 --to tasks \
 | jq -c 'select(.properties.hs_task_status != "COMPLETED")'
 ```
 
+## Open tasks portal-wide — exclude statuses server-side with `@!=`
+
+`@!=` is NOT_IN: one condition for the whole excluded list. Do **not** spend one `--filter` flag per excluded status — the search API caps a request at 5 filter groups, 6 conditions per group, and 18 conditions total.
+
+`@!=` matches only records that *have* the property, so replicating a real HubSpot task view's "status is none of … or is empty" needs two groups (OR'd), with the shared conditions repeated in each:
+
+```bash
+hubspot objects search --type tasks \
+  --filter "hubspot_owner_id=123 AND hs_task_status@!=COMPLETED,DEFERRED" \
+  --filter "hubspot_owner_id=123 AND !hs_task_status" \
+  --properties hs_task_subject,hs_task_status,hs_task_priority,hs_timestamp
+```
+
+Inverse (only these statuses) is `@=` (IN): `--filter "hs_task_status@=NOT_STARTED,IN_PROGRESS,WAITING"`.
+
 ## Bulk: follow-up task per deal in a stage
 
 The deal ID and the task ID must travel together. Persist the deal payload to a file, create tasks (output order matches input order — see bulk-operations), then zip the two ID lists line-by-line and stream association pairs in one call.
@@ -118,4 +133,4 @@ For >100 rows, apply the dry-run / digest / confirm pattern from `bulk-operation
 
 ## Known constraints
 
-Activities must be associated immediately or they're invisible in the CRM UI. `properties get` doesn't return enum option values for activity types — use the reference. No sequences/cadences in the CLI.
+Activities must be associated immediately or they're invisible in the CRM UI. `properties get` doesn't return enum option values for activity types — use the reference. Sales Hub sequences are read-only in the CLI (`hubspot sequences list` / `get` / `enrollments`, `automation.sequences.read` scope) — the CLI cannot enroll a contact in a sequence, so drive outreach via tasks/activities above. This surface grows; recheck `hubspot --help` / `CHANGELOG.md` before assuming an API is missing.
