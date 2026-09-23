@@ -29,6 +29,8 @@ npx skills hubspot/agent-cli-skills/bulk-operations
 | `bulk-operations` | Foundation: JSONL pipes, batch read, pagination, dry-run/digest/confirm for destructive ops, `hubspot history` recovery |
 | `audience-targeting` | Build targeted contact segments by filtering on lifecycle stage, engagement, and firmographics |
 | `communication-history` | Retrieve activity history for CRM records and assemble pre-call research briefs |
+| `conversation-history-brief` | Pull conversation thread history for a CRM contact across all inboxes and assemble an account brief section |
+| `conversation-inbox-triage` | Audit inboxes for open/unassigned/stale threads, assign to team members, bulk archive resolved threads |
 | `crm-data-quality` | Find incomplete records, normalize field values, and dedupe via `objects merge` |
 | `crm-lookup` | Find records by ID/email/domain/partial name and traverse associations for a full picture |
 | `custom-object-management` | Manage custom object schemas: list, create, update labels, delete |
@@ -40,6 +42,7 @@ npx skills hubspot/agent-cli-skills/bulk-operations
 | `sales-reporting` | Daily sales briefings, pipeline snapshots, and win/loss analysis |
 | `team-ownership` | Assign, reassign, and audit record ownership across contacts, deals, and companies |
 | `ticket-resolution` | Create and triage support tickets, move them through pipelines, and log resolution |
+| `visitor-identification` | Generate a Conversations visitor identification token for a known website visitor; guidance on scopes, tier requirements, and SDK integration |
 | `workflow-automation` | List, create, update, and delete HubSpot workflows from the CLI |
 
 ---
