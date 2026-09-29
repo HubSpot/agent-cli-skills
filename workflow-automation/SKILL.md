@@ -39,14 +39,18 @@ If anything here ever drifts, `hubspot workflows --help` and `hs --help` are aut
 
 `hubspot workflows --help` lists five subcommands: `list`, `get`, `create`, `update`, `delete`. There is **no `search`** — finding by name is `list | jq`. For JSONL piping, pagination, and destructive dry-run/digest/confirm patterns, this skill builds on `bulk-operations/SKILL.md` — re-read that first.
 
-## Auth — service key required
+## Auth — OAuth login or service key
 
-**Every `hubspot workflows` command requires `HUBSPOT_ACCESS_TOKEN` (a service key).** None of them work under `hubspot auth login` (user OAuth) — the CLI rejects them up front with `This endpoint does not support user-level OAuth tokens`. The `automation` scope the v4 flows API needs is not available to the CLI's user-level OAuth app, so set a service key before running anything in this skill:
+**Every `hubspot workflows` command works with both `hubspot auth login` (user OAuth) and `HUBSPOT_ACCESS_TOKEN` (a service key).** The v4 flows API accepts user tokens; the `automation` scope it needs is now part of the CLI app's requestable scopes, so a plain `hubspot auth login` is enough:
 
 ```bash
+hubspot auth login          # user OAuth — grant the "automation" scope when prompted
+# or
 export HUBSPOT_ACCESS_TOKEN=<service-key>   # create at Settings → Integrations → Service keys
 hubspot workflows list
 ```
+
+If a user token 403s with a missing-scope error, re-run `hubspot auth login` so the newly added `automation` scope is granted.
 
 ## 1. List + find by name
 

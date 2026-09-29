@@ -206,7 +206,7 @@ hubspot objects search --type contacts --filter "!email" \
 
 ## Known constraints
 
-- Some destructive operations may be blocked under user-OAuth (browser login); set `HUBSPOT_ACCESS_TOKEN` (private app token) when running deletes if the CLI returns a permission error.
+- `objects delete` works under both user-OAuth (browser login, with the object's write scope) and a service key; a 403 means the active token is missing that write scope. The exception is the `--gdpr` permanent purge, which requires a service key (`HUBSPOT_ACCESS_TOKEN`) — the GDPR endpoint does not accept user OAuth tokens. Some other destructive operations (e.g. `associations` batch/labels/limits, `schemas delete`) remain service-key-only and are enforced server-side, so `HUBSPOT_SKIP_AUTH_CHECK` will not get a user token past them.
 - `hubspot owners list` returns CRM users; there is no `teams` object. For team-level operations, group by `hubspot_owner_id` client-side.
 - `hubspot segments` provides CRM lists (Lists API): `list`, `get`, `create`, `update` (metadata), `update-filters`, `delete`, `restore`, and `members-list` / `members-add` / `members-remove`.
 - `hubspot sequences` provides read-only access to Sales Hub sequences: `list --user-id <id>` (paginated, `--name` filter), `get <id> --user-id <id>` (steps + settings), and `enrollments <contact_id>` (a contact's enrollment history). Sequences are a product API surface (Sales Hub Professional+, `automation.sequences.read` scope), not a CRM object type — `objects list --type sequences` does not work, and there is no create/update/delete/enroll.
