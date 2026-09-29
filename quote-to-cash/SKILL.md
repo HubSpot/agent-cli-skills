@@ -124,6 +124,6 @@ hubspot objects search --type subscriptions \
 ## Known constraints
 
 - `invoices`, `subscriptions`, `orders`, `carts` need the matching read scope on the active token; 403 means the user OAuth login or private-app token is missing the scope.
-- Destructive ops (`objects delete` on products/quotes/line_items) often need a private-app token: `export HUBSPOT_ACCESS_TOKEN=<token>`. See `bulk-operations/SKILL.md` for the dry-run → digest → confirm flow before bulk-deleting catalog records.
+- `objects delete` on products/quotes/line_items works under both user OAuth (`hubspot auth login`, with the object's write scope) and a service key (`export HUBSPOT_ACCESS_TOKEN=<token>`); a 403 means the active token is missing that write scope. The exception is the `--gdpr` permanent purge, which requires a service key — the GDPR endpoint does not accept user OAuth tokens. See `bulk-operations/SKILL.md` for the dry-run → digest → confirm flow before bulk-deleting catalog records.
 - Quote share links, PDF generation, approval routing, and from-scratch invoice creation are UI-only — the CLI updates records but cannot send a quote to a customer.
 - `hs_total_discount` on line items is read-only — set `discount` (percentage) instead.
