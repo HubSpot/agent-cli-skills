@@ -135,6 +135,22 @@ hubspot objects search --type deals \
 | column -t -s$'\t'
 ```
 
+## 4. Saved reports
+
+The `hubspot reports` family runs HubSpot's saved reports and CRM-SQL reports server-side, so you don't have to recompute aggregates client-side:
+
+- `reports list` / `get <id>` — browse and inspect saved reports.
+- `reports fetch-dataset <id>` — re-execute a saved report server-side and return its dataset.
+- `reports create "<CRM SQL>"` — create a report from a CRM-SQL query (a companion skill can generate the SQL); `reports insights <id>` generates AI insights (async, polls to completion).
+- `reports update <id>` / `clone <id>` / `favorite <id>` / `unfavorite <id>` — manage report metadata.
+- `reports delete <id>` — irreversible, digest-gated: `--dry-run` first, then `--digest <hash> --confirm "<report name>"` (confirm = the report's name).
+
+Run `hubspot reports --help` for the full surface and the CRM-SQL grammar.
+
+## 5. Win/loss context: sequence enrollments
+
+`hubspot sequences enrollments <contact_id>` returns a contact's Sales Hub sequence enrollment history (read-only) — useful for attributing wins/losses to outreach. Each row: `{"contactId":789,"enrollments":[{"sequenceName":"Q4 Outbound","state":"FINISHED","enrolledAt":"...","currentStepOrder":5,"totalSteps":6}]}`. Join it to a deal's associated contacts for a "was this deal worked through a sequence?" view. See `hubspot sequences enrollments --help`.
+
 ## Known limitations
 
 - `hubspot pipelines stages` does not expose stage probability — won/lost stages can't be auto-identified from the stages list. Use `hs_is_closed_won` on deals instead.
