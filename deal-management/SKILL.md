@@ -76,8 +76,12 @@ hubspot objects create --type deals \
 hubspot associations create --from deals:<deal_id> --to contacts:<contact_id>
 hubspot associations create --from deals:<deal_id> --to companies:<company_id>
 
+# lifecycle promote — objects update is irreversible, so dry-run then confirm with the contact ID
 hubspot objects update --type contacts <contact_id> \
-  --property lifecyclestage=salesqualifiedlead --property hs_lead_status=OPEN_DEAL
+  --property lifecyclestage=salesqualifiedlead --property hs_lead_status=OPEN_DEAL --dry-run
+hubspot objects update --type contacts <contact_id> \
+  --property lifecyclestage=salesqualifiedlead --property hs_lead_status=OPEN_DEAL \
+  --digest <hash> --confirm <contact_id>
 ```
 
 ### Bulk pattern — many MQLs at once
@@ -107,9 +111,16 @@ paste <(jq -r '.id' /tmp/mqls.jsonl) <(jq -r '.id' /tmp/deals.jsonl) \
 | jq -cR 'split("\t") | {from:("deals:" + .[1]), to:("contacts:" + .[0])}' \
 | hubspot associations create
 
-# 5. promote lifecycle on every contact
+# 5. promote lifecycle on every contact — objects update is irreversible, so dry-run then re-pipe with the digest/confirm
 jq -c '{id, properties:{lifecyclestage:"salesqualifiedlead", hs_lead_status:"OPEN_DEAL"}}' /tmp/mqls.jsonl \
-| hubspot objects update --type contacts
+| hubspot objects update --type contacts --dry-run \
+| tee /tmp/promote.preview.jsonl
+
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/promote.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/promote.preview.jsonl)   # batch: row count
+
+jq -c '{id, properties:{lifecyclestage:"salesqualifiedlead", hs_lead_status:"OPEN_DEAL"}}' /tmp/mqls.jsonl \
+| hubspot objects update --type contacts --digest "$digest" --confirm "$confirm"
 ```
 
 Company associations need a separate per-contact pass via `hubspot associations list --from contacts:<id> --to companies` — a contact may have zero or many companies.
@@ -119,20 +130,36 @@ Pre-qualification checks are just filters on the search: has email, has a compan
 ## 3. Advance or reassign in bulk
 
 ```bash
-# move every deal in one stage to the next — preview, then re-run without --dry-run
+# move every deal in one stage to the next — 1. preview
 hubspot objects search --type deals --filter "dealstage=qualifiedtobuy" \
 | jq -c '{id, properties:{dealstage:"presentationscheduled"}}' \
-| hubspot objects update --type deals --dry-run
+| hubspot objects update --type deals --dry-run \
+| tee /tmp/advance.preview.jsonl
 
-# reassign open deals from one rep to another
+# 2. lift the digest + confirm (present at every size)
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/advance.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/advance.preview.jsonl)   # batch: row count; single: record ID
+
+# 3. execute — re-pipe the SAME inputs plus --digest/--confirm
+hubspot objects search --type deals --filter "dealstage=qualifiedtobuy" \
+| jq -c '{id, properties:{dealstage:"presentationscheduled"}}' \
+| hubspot objects update --type deals --digest "$digest" --confirm "$confirm"
+
+# reassign open deals from one rep to another — same three steps
 OLD=$(hubspot owners list --format jsonl | jq -r 'select(.email=="old@co.com") | .id')
 NEW=$(hubspot owners list --format jsonl | jq -r 'select(.email=="new@co.com") | .id')
 hubspot objects search --type deals --filter "hubspot_owner_id=$OLD AND hs_is_closed!=true" \
 | jq -c "{id, properties:{hubspot_owner_id:\"$NEW\"}}" \
-| hubspot objects update --type deals --dry-run
+| hubspot objects update --type deals --dry-run \
+| tee /tmp/deal-reassign.preview.jsonl
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/deal-reassign.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/deal-reassign.preview.jsonl)
+hubspot objects search --type deals --filter "hubspot_owner_id=$OLD AND hs_is_closed!=true" \
+| jq -c "{id, properties:{hubspot_owner_id:\"$NEW\"}}" \
+| hubspot objects update --type deals --digest "$digest" --confirm "$confirm"
 ```
 
-For >100 rows, the dry-run emits a digest line; re-pipe with `--digest <hash> --confirm <count>`. Full flow in `bulk-operations/SKILL.md`.
+The dry-run emits a digest at every size (confirm = the row count for a batch, the record ID for a single); re-pipe with `--digest <hash> --confirm <value>` lifted from the preview line. Full flow in `bulk-operations/SKILL.md`.
 
 ## 4. Find stalled deals
 
@@ -160,14 +187,24 @@ hubspot objects search --type deals \
 Closing is a stage update + `closedate` (YYYY-MM-DD). `hs_is_closed` and `hs_is_closed_won` are read-only — HubSpot derives them from the stage.
 
 ```bash
-# single
+# single — objects update is irreversible, so dry-run then confirm with the deal ID
 hubspot objects update --type deals <deal_id> \
-  --property dealstage=closedwon --property closedate=2026-05-15
+  --property dealstage=closedwon --property closedate=2026-05-15 --dry-run
+hubspot objects update --type deals <deal_id> \
+  --property dealstage=closedwon --property closedate=2026-05-15 --digest <hash> --confirm <deal_id>
 
-# bulk — preview first
+# bulk — preview first, then re-pipe with the digest/confirm from the preview (confirm = row count)
 hubspot objects search --type deals --filter "dealstage=contractsent AND hubspot_owner_id=<owner_id>" \
 | jq -c '{id, properties:{dealstage:"closedwon", closedate:"2026-05-15"}}' \
-| hubspot objects update --type deals --dry-run
+| hubspot objects update --type deals --dry-run \
+| tee /tmp/close.preview.jsonl
+
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/close.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/close.preview.jsonl)
+
+hubspot objects search --type deals --filter "dealstage=contractsent AND hubspot_owner_id=<owner_id>" \
+| jq -c '{id, properties:{dealstage:"closedwon", closedate:"2026-05-15"}}' \
+| hubspot objects update --type deals --digest "$digest" --confirm "$confirm"
 ```
 
 Win/loss analysis (close reasons, win rate, ARR roll-up) is in the `sales-reporting` skill.
