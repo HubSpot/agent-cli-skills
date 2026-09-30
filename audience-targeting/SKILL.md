@@ -32,7 +32,7 @@ Source of truth: `hubspot objects search --help`.
 
 ## Properties this skill turns on
 
-Full live list: `hubspot properties list --type contacts`. Enum options aren't exposed by `properties get`; discover with `hubspot objects list --type contacts --properties <name> --limit 100 --format json | jq -r '.data[].properties.<name> // empty' | sort -u`.
+Full live list: `hubspot properties list --type contacts`. Enum options: `hubspot properties options-list --type contacts <name> | jq -r '.value'`. As a fallback (e.g. to see which values are actually in use), read live records: `hubspot objects list --type contacts --properties <name> --limit 100 --format json | jq -r '.data[].properties.<name> // empty' | sort -u`.
 
 Core fields used here: `lifecyclestage`, `hubspot_owner_id` (bare/`!` for owned/unowned; `hubspot owners list` for IDs), `hs_email_optout` (`!=true` excludes opted-out), `hs_email_last_open_date` / `notes_last_contacted` (recency), `jobtitle` / `country` / `city` (string `=` or `~`), `num_associated_deals` (0 net-new, `>=1` has-pipeline).
 
@@ -66,7 +66,7 @@ More patterns (lead status, deals, owners, combined AND/OR) in `resources/contac
 
 ## Cross-object: companies-in-industry → their contacts
 
-`industry`/`numberofemployees`/`annualrevenue` live on the company. Build the company set, then traverse — never `xargs -I{} hubspot objects get` per company. `associations list` emits `{"id":"...","type":"company_to_contact"}`, feeding directly into a single batched `objects get`.
+`industry`/`numberofemployees`/`annualrevenue` live on the company. Build the company set, then traverse — never `xargs -I{} hubspot objects get` per company. `associations list` emits `{"id":"...","labels":[...],"associationTypes":[...]}` — `{id}` feeds directly into a single batched `objects get`.
 
 ```bash
 # Step 1: target companies. Industry options are portal-specific — discover with:
@@ -78,8 +78,17 @@ hubspot objects search --type companies \
   > target_companies.jsonl
 
 # Step 2: gather association IDs (associations list has no batch --from), then ONE batched
-# objects get for all contacts.
-while read -r cid; do hubspot associations list --from "companies:$cid" --to contacts; done \
+# objects get for all contacts. Page each company with --limit/--after — a company with >100
+# associated contacts truncates silently on a single call.
+while read -r cid; do
+  after=""
+  while :; do
+    page=$(hubspot associations list --from "companies:$cid" --to contacts --limit 100 ${after:+--after "$after"} --format json)
+    echo "$page" | jq -c '.data[]?'
+    after=$(echo "$page" | jq -r '.meta.next // empty')
+    [ -z "$after" ] && break
+  done
+done \
   < <(jq -r '.id' target_companies.jsonl) \
 | jq -c '{id}' | sort -u \
 | hubspot objects get --type contacts --properties email,firstname,jobtitle,hs_email_optout \
@@ -119,9 +128,17 @@ A JSONL segment is portable, but you can also persist an audience in HubSpot:
 - **View** — `hubspot views create --type <t> --name "..." --columns a,b [--filters-file filters.json] [--sort prop:asc]` saves a filter set as a reusable object view; `views list` / `get` / `update` / `replace-field` / `delete` manage it.
 - **Size it first** — `hubspot objects count --type contacts --filter "..."` returns `{"object_type":"contacts","total":N}` without paging, so you can size an audience before saving or exporting it.
 
+## Related read-only signals (context for targeting)
+
+- `hubspot buyer-intent` — visiting-company intent signals (read-only). **Requires OAuth login (`hubspot auth login`); service keys are NOT supported.**
+- `hubspot analytics traffic sources` — where sessions/contacts came from, for source-based segmentation.
+- `hubspot marketing forms list` — form definitions, to segment by which form a contact converted on.
+
+Run each command's `--help` for the full surface.
+
 ## Known limits
 
 - `~` is token-match, not substring. No regex operator.
-- `properties get` does not return enum options — discover via `objects list` + `jq`.
-- `associations list` has no batch `--from`. Loop to gather IDs, batch the downstream `objects get`.
+- Enum options: `hubspot properties options-list --type contacts <name>` (fallback: read live records via `objects list` + `jq`).
+- `associations list` has no batch `--from`, and returns one page (default 100) per call. Loop to gather IDs and page each call with `--limit`/`--after` until `.meta.next` is null, then batch the downstream `objects get` — otherwise a company with >100 associated contacts truncates silently.
 - For >100 results, use the pagination loop in `bulk-operations/SKILL.md`.

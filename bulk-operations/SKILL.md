@@ -105,6 +105,8 @@ bash resources/pagination-loop.sh deals /tmp/deals.jsonl
 
 The script pages through `--after` cursors automatically, prints progress to stderr, and writes JSONL to the output file. Run it as a single foreground command — do not background it or reconstruct the loop inline.
 
+`associations list` also paginates (`--limit` / `--after`, default limit 100): under `--format json` the next-page cursor is at `.meta.next`, null once the last page is reached. A record can have far more associated records than one page holds, so treat a present cursor as "more remain" and page with `--after` until it is null.
+
 ## Write in batch — always pipe
 
 Write commands accept JSONL on stdin. The transformation between a read shape and a write shape is a `jq` reshape:
@@ -122,21 +124,17 @@ Use **plural** object names in `from`/`to` (`contacts:`, not `contact:`).
 
 ## Safe destructive workflow
 
-Every destructive op (`delete`, `merge`, bulk `update`) supports `--dry-run`. The gating depends on row count:
+Irreversible writes — `objects delete`, `merge`, `update`, `upsert`, `associations delete` / `limits-update`, and metadata deletes (workflows, segments, views, reports, schemas, pipelines, properties) — **always** require the two-step dry-run → digest → confirm flow, at ANY row count (one record needs it just as much as 10k). Soft writes (`objects create`, `views create/update/replace-field`, label-only `properties update`, `segments members-add`) run without a digest; their `--dry-run` is a plain preview.
 
-**≤100 rows** — dry-run emits one preview line per record:
+**1. Dry-run** — emits ONE preview line for the whole invocation (not per record), at every size:
+
 ```json
-{"ok":true,"dry_run":true,"executed":false,"mutation_kind":"RecordMutation","command":"objects delete contacts","target":{"kind":"contacts_record","id":"123","name":"123"}}
+{"ok":true,"dry_run":true,"executed":false,"mutation_kind":"RecordMutation","command":"objects delete --type contacts","target":{"kind":"contacts_record","id":"123","name":"123"},"impact":{"records_affected":1,"note":"Delete 1 contacts record(s)","reversible":false},"portal":"123456","digest":"blast-29cfdd48b583","expires_in_seconds":300,"apply_command_hint":"hubspot objects delete --type contacts --digest blast-29cfdd48b583 --confirm '123'"}
 ```
-Re-run without `--dry-run` to execute.
 
-**>100 rows** — dry-run emits a single `BulkData` line with a digest and an `apply_command_hint`:
-```json
-{"ok":true,"dry_run":true,"executed":false,"mutation_kind":"BulkData","portal":"123456","target":{"name":"202 records"},"impact":{"records_affected":202,"reversible":false},"digest":"blast-29cfdd48b583","expires_in_seconds":300,"apply_command_hint":"hubspot objects delete contacts --digest blast-29cfdd48b583 --confirm '202'"}
-```
-You must re-run with `--digest <hash> --confirm <value>` within 5 minutes. The `confirm` value is the record count (deletes) or the secondary ID (merge). Read it off `apply_command_hint`.
+`mutation_kind` is `RecordMutation` for ≤100 rows and `BulkData` above the bulk threshold — **the digest is present in both cases**, so never filter on `mutation_kind`. Confirm values by command: `objects delete`/`update` → the record ID (single) or the row count (batch of 2+); `objects upsert` → the row count (always); `objects merge` → the secondary ID (one pair) or the row count (batch); metadata deletes → the target's name (workflow/view/report/schema/pipeline), the property/option name, or the row count (batch archives, associations batch ops). Don't construct the confirm value — copy it from `apply_command_hint` (or `.target.id` / `.target.name` on the preview line).
 
-Three-step pattern:
+**2. Execute** within 5 minutes (digest TTL 300s): re-pipe the SAME inputs plus `--digest` and `--confirm`:
 
 ```bash
 # 1. Preview
@@ -145,15 +143,17 @@ hubspot objects search --type contacts --filter "lifecyclestage=subscriber" \
 | hubspot objects delete --type contacts --dry-run \
 | tee /tmp/preview.jsonl
 
-# 2. Lift the digest + confirm value (only present for >100 rows)
-digest=$(jq -r 'select(.mutation_kind=="BulkData") | .digest' /tmp/preview.jsonl)
-confirm=$(jq -r 'select(.mutation_kind=="BulkData") | .impact.records_affected' /tmp/preview.jsonl)
+# 2. Lift the digest + confirm value (present at EVERY row count)
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/preview.jsonl)
 
 # 3. Execute — re-pipe the SAME inputs
 hubspot objects search --type contacts --filter "lifecyclestage=subscriber" \
 | jq -c '{id}' \
 | hubspot objects delete --type contacts --digest "$digest" --confirm "$confirm"
 ```
+
+Executing without `--digest` fails with `digest_required` (the error's `next_step` names the dry-run command); a wrong confirm fails with `confirm_mismatch`; an expired digest with `digest_expired`. `--force` is deprecated and ignored.
 
 ## Recovery via `hubspot history`
 
@@ -178,35 +178,61 @@ cat external.jsonl \
 | jq -c '{idProperty:"email", id:.email, properties:{firstname:.first, lastname:.last, company:.company}}' \
 | hubspot objects upsert --type contacts --dry-run
 
-# Or set idProperty once:
+# Or set idProperty once (upsert is irreversible — dry-run first, then execute):
 cat external.jsonl \
 | jq -c '{id:.email, properties:{firstname:.first}}' \
-| hubspot objects upsert --type contacts --id-property email
+| hubspot objects upsert --type contacts --id-property email --dry-run \
+| tee /tmp/upsert.preview.jsonl
+
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/upsert.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/upsert.preview.jsonl)   # upsert confirm = the row count, even for one row
+
+cat external.jsonl \
+| jq -c '{id:.email, properties:{firstname:.first}}' \
+| hubspot objects upsert --type contacts --id-property email --digest "$digest" --confirm "$confirm"
 ```
 
 ## Rate-limit hygiene
 
-There is no true batch endpoint behind `update`/`delete`/`upsert` — the CLI issues one API call per stdin line. Test with `head -n 50` before piping a 50k-row file. If the API starts 429ing, the per-line output will show `{"ok":false,"error":{"status":429,...}}` — split your input file and retry the failed lines.
+`objects delete` issues one API call per stdin line; `update`/`upsert` batch 100 rows per API call. Test with `head -n 50` before piping a 50k-row file — or use `hubspot imports` for purpose-built bulk ingest. If the API starts 429ing, the per-line output will show `{"ok":false,"error":{"status":429,...}}` — split your input file and retry the failed lines.
+
+For large CSV ingests, `hubspot imports` is the purpose-built path: `imports start` (from a CSV file + import-request JSON; supports `--dry-run`), `imports list`, `imports get <id>`, `imports cancel <id>` (irreversible — dry-run first, then `--digest`/`--confirm` with the import ID), and `imports errors <id>`. Run `hubspot imports --help` for the request shape.
 
 ## Common reshapes
 
 See `resources/json-patterns.md` for the full set. The two you need 90% of the time:
 
 ```bash
-# Read → update payload
+# Read → update payload (update is irreversible — dry-run, then re-pipe with the digest/confirm from the preview)
 hubspot objects search --type contacts --filter "industry=Tech" \
 | jq -c '{id, properties:{lifecyclestage:"marketingqualifiedlead"}}' \
-| hubspot objects update --type contacts
+| hubspot objects update --type contacts --dry-run \
+| tee /tmp/update.preview.jsonl
 
-# Search → delete list
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/update.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/update.preview.jsonl)   # single: record ID; batch of 2+: row count
+
+hubspot objects search --type contacts --filter "industry=Tech" \
+| jq -c '{id, properties:{lifecyclestage:"marketingqualifiedlead"}}' \
+| hubspot objects update --type contacts --digest "$digest" --confirm "$confirm"
+
+# Search → delete list (delete is irreversible — dry-run, lift, then re-pipe with --digest/--confirm)
 hubspot objects search --type contacts --filter "!email" \
 | jq -c '{id}' \
-| hubspot objects delete --type contacts --dry-run
+| hubspot objects delete --type contacts --dry-run \
+| tee /tmp/delete.preview.jsonl
+
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/delete.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/delete.preview.jsonl)   # single: record ID; batch of 2+: row count
+
+hubspot objects search --type contacts --filter "!email" \
+| jq -c '{id}' \
+| hubspot objects delete --type contacts --digest "$digest" --confirm "$confirm"
 ```
 
 ## Known constraints
 
-- `objects delete` works under both user-OAuth (browser login, with the object's write scope) and a service key; a 403 means the active token is missing that write scope. The exception is the `--gdpr` permanent purge, which requires a service key (`HUBSPOT_ACCESS_TOKEN`) — the GDPR endpoint does not accept user OAuth tokens. Some other destructive operations (e.g. `associations` batch/labels/limits, `schemas delete`) remain service-key-only and are enforced server-side, so `HUBSPOT_SKIP_AUTH_CHECK` will not get a user token past them.
+- `objects delete` works under both user-OAuth (browser login, with the object's write scope) and a service key; a 403 means the active token is missing that write scope. The exception is the `--gdpr` permanent purge, which requires a service key (`HUBSPOT_ACCESS_TOKEN`) — the GDPR endpoint does not accept user OAuth tokens. `objects update`/`merge`/`upsert` also accept either token type. Some destructive operations (e.g. `associations` create/delete/batch/labels/limits, `schemas delete`) remain service-key-only and are enforced server-side, so `HUBSPOT_SKIP_AUTH_CHECK` will not get a user token past them.
 - `hubspot owners list` returns CRM users; there is no `teams` object. For team-level operations, group by `hubspot_owner_id` client-side.
 - `hubspot segments` provides CRM lists (Lists API): `list`, `get`, `create`, `update` (metadata), `update-filters`, `delete`, `restore`, and `members-list` / `members-add` / `members-remove`.
 - `hubspot sequences` provides read-only access to Sales Hub sequences: `list --user-id <id>` (paginated, `--name` filter), `get <id> --user-id <id>` (steps + settings), and `enrollments <contact_id>` (a contact's enrollment history). Sequences are a product API surface (Sales Hub Professional+, `automation.sequences.read` scope), not a CRM object type — `objects list --type sequences` does not work, and there is no create/update/delete/enroll.

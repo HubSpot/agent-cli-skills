@@ -24,7 +24,7 @@ triggers:
 
 Read `bulk-operations/SKILL.md` first — JSONL piping, batch read, pagination, and the dry-run/digest/confirm flow for destructive ops live there. Reshape recipes (read → write payload) are in `bulk-operations/resources/json-patterns.md`.
 
-`hubspot <command> --help` is the source of truth. Object types are plural (`products`, `line_items`, `quotes`, `invoices`, `subscriptions`). Never hardcode property tables — `hubspot properties list --type <type>` is one call away. Verify any enum value the agent is about to write with `hubspot properties get --type <type> --name <property>` and read `options[].value`.
+`hubspot <command> --help` is the source of truth. Object types are plural (`products`, `line_items`, `quotes`, `invoices`, `subscriptions`). Never hardcode property tables — `hubspot properties list --type <type>` is one call away. Verify any enum value the agent is about to write with `hubspot properties options-list --type <type> <property> | jq -r '.value'`.
 
 Portal note: `invoices`, `subscriptions`, `orders`, `carts` show an empty `objectTypeId` in `hubspot objects types`. They work through `objects search`/`list` when the token has the matching scope (`invoices-read`, `subscriptions-read`, etc.) and 403 otherwise. CLI-created quotes are always `DRAFT`; approval routing, share links, PDF generation, and invoice creation usually require the HubSpot UI.
 
@@ -37,7 +37,7 @@ hubspot objects create --type products \
   --property hs_sku=ENT-001
 ```
 
-For a recurring product set `recurringbillingfrequency`; check the API enum values first with `hubspot properties get --type products --name recurringbillingfrequency --format json | jq -r '.options[].value'`. Bulk-import a catalog by piping JSONL of `{"properties":{...}}` to `hubspot objects create --type products --dry-run`.
+For a recurring product set `recurringbillingfrequency`; check the API enum values first with `hubspot properties options-list --type products recurringbillingfrequency | jq -r '.value'`. Bulk-import a catalog by piping JSONL of `{"properties":{...}}` to `hubspot objects create --type products --dry-run`.
 
 ## 2. Build a quote: line items → quote → associations
 
@@ -69,15 +69,16 @@ jq -r '.id' /tmp/lineitems.jsonl \
 hubspot associations create --from "deals:$DEAL_ID" --to "quotes:$QUOTE_ID"
 ```
 
-Discount handling — `discount` is the writable percentage (`10` = 10% off). `hs_total_discount` is HubSpot-computed; do not set it. Verify with `hubspot properties get --type line_items --name hs_total_discount` (look for `modificationMetadata.readOnlyValue:true`) before relying on this in a portal you don't own.
+Discount handling — `discount` is the writable percentage (`10` = 10% off). `hs_total_discount` is HubSpot-computed; do not set it. Verify with `hubspot properties get --type line_items hs_total_discount` (property name is positional; look for `modificationMetadata.readOnlyValue:true`) before relying on this in a portal you don't own.
 
-Promote a quote out of `DRAFT` when ready to share:
+Promote a quote out of `DRAFT` when ready to share. `objects update` is irreversible — dry-run first, then re-run with the digest and `--confirm <quote_id>`:
 
 ```bash
-hubspot objects update --type quotes <quote_id> --property hs_status=APPROVAL_NOT_NEEDED
+hubspot objects update --type quotes <quote_id> --property hs_status=APPROVAL_NOT_NEEDED --dry-run
+hubspot objects update --type quotes <quote_id> --property hs_status=APPROVAL_NOT_NEEDED --digest <hash> --confirm <quote_id>
 ```
 
-Verify `hs_status` enum values for your portal: `hubspot properties get --type quotes --name hs_status --format json | jq -r '.options[].value'`.
+Verify `hs_status` enum values for your portal: `hubspot properties options-list --type quotes hs_status | jq -r '.value'`.
 
 ## 3. Track invoices
 
@@ -100,15 +101,14 @@ hubspot objects search --type invoices \
   --properties hs_number,hs_amount_billed,hs_invoice_date
 ```
 
-Verify the status enum the same way: `hubspot properties get --type invoices --name hs_invoice_status --format json | jq -r '.options[].value'`.
+Verify the status enum the same way: `hubspot properties options-list --type invoices hs_invoice_status | jq -r '.value'`.
 
 ## 4. Track subscriptions
 
 Same shape, filter on `hs_subscription_status`. Verify the enum values before writing the filter — do not hardcode `ACTIVE`/`CANCELLED`/`PAST_DUE`:
 
 ```bash
-hubspot properties get --type subscriptions --name hs_subscription_status --format json \
-  | jq -r '.options[].value'
+hubspot properties options-list --type subscriptions hs_subscription_status | jq -r '.value'
 
 # Then filter (case matters)
 hubspot objects search --type subscriptions \
@@ -123,7 +123,7 @@ hubspot objects search --type subscriptions \
 
 ## Known constraints
 
-- `invoices`, `subscriptions`, `orders`, `carts` need the matching read scope on the active token; 403 means the user OAuth login or private-app token is missing the scope.
+- `invoices`, `subscriptions`, `orders`, `carts`, `payments` need the matching read scope on the active token; 403 means the user OAuth login or private-app token is missing the scope.
 - `objects delete` on products/quotes/line_items works under both user OAuth (`hubspot auth login`, with the object's write scope) and a service key (`export HUBSPOT_ACCESS_TOKEN=<token>`); a 403 means the active token is missing that write scope. The exception is the `--gdpr` permanent purge, which requires a service key — the GDPR endpoint does not accept user OAuth tokens. See `bulk-operations/SKILL.md` for the dry-run → digest → confirm flow before bulk-deleting catalog records.
 - Quote share links, PDF generation, approval routing, and from-scratch invoice creation are UI-only — the CLI updates records but cannot send a quote to a customer.
 - `hs_total_discount` on line items is read-only — set `discount` (percentage) instead.

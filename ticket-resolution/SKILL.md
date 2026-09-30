@@ -29,14 +29,16 @@ The stage table prints each stage's `ID` and `Label` ("New", "Waiting on contact
 
 ## 2. Verify enum option values for THIS portal
 
-`hs_ticket_priority`, `hs_ticket_category`, and `hs_resolution` are all `enumeration` properties — option values are portal-configurable and `hubspot properties get` does NOT return them. Discover by probing or by reading live records:
+`hs_ticket_priority`, `hs_ticket_category`, and `hs_resolution` are all `enumeration` properties — option values are portal-configurable. List the allowed options directly with `properties options-list` (the old `objects update … --property hs_resolution=__probe__` probe no longer works — updates are digest-gated now):
 
 ```bash
-# Probe: send an invalid value; the 400 error lists the allowed options.
-hubspot objects update --type tickets <some_ticket_id> --property hs_resolution=__probe__
-# error: "was not one of the allowed options: [ISSUE_FIXED, FEATURE_REQUEST_TRACKED, ...]"
+# List the allowed option values for each enum
+hubspot properties options-list --type tickets hs_ticket_priority | jq -r '.value'
+hubspot properties options-list --type tickets hs_ticket_category | jq -r '.value'
+hubspot properties options-list --type tickets hs_resolution      | jq -r '.value'
+# each row: {"value":"ISSUE_FIXED","label":"Issue fixed","displayOrder":0,"hidden":false}
 
-# Or read values already in use:
+# Fallback — read values already in use on live records:
 hubspot objects list --type tickets --limit 10 \
   --properties hs_ticket_priority,hs_ticket_category,hs_resolution
 ```
@@ -96,7 +98,7 @@ hubspot objects search --type tickets \
 | hubspot objects update --type tickets --dry-run
 ```
 
-Re-pipe the same search without `--dry-run` to execute. For >100 rows, follow the `--digest/--confirm` flow in `bulk-operations/SKILL.md` ("Safe destructive workflow"). Reassign in bulk works identically with `{hubspot_owner_id:"<new>"}`.
+`objects update` is irreversible, so re-pipe the same search with the `--digest`/`--confirm` lifted from the preview line — required at every row count, not just >100 (confirm = the row count for a batch). See the `--digest`/`--confirm` flow in `bulk-operations/SKILL.md` ("Safe destructive workflow"). Reassign in bulk works identically with `{hubspot_owner_id:"<new>"}`.
 
 ## 6. Log a resolution note
 
@@ -106,13 +108,18 @@ Activity creation lives in `sales-execution/SKILL.md` (notes/calls/meetings/task
 
 `hs_resolution` is an enumeration — pass an allowed option value from Step 2, not free text. HubSpot then computes `hs_is_closed=true`, `closed_date`, and `time_to_close`.
 
+`objects update` is irreversible — dry-run first, then re-run with the digest and `--confirm <ticket_id>`:
+
 ```bash
 hubspot objects update --type tickets <ticket_id> \
   --property hs_pipeline_stage=<closed_stage_id> \
-  --property hs_resolution=<allowed_resolution_value>
+  --property hs_resolution=<allowed_resolution_value> --dry-run
+hubspot objects update --type tickets <ticket_id> \
+  --property hs_pipeline_stage=<closed_stage_id> \
+  --property hs_resolution=<allowed_resolution_value> --digest <hash> --confirm <ticket_id>
 ```
 
 ## Known limitations
 
-- `properties get`/`list` do not return enum options — probe via update error or read live records (CLI ask logged).
-- No Conversations/Inbox API surface — chat threads and inbox emails are not CLI-accessible.
+- Enum options: list them with `hubspot properties options-list --type tickets <property>` (fallback: read live records).
+- Chat/inbox: `hubspot conversations` reads inboxes, channels, threads, and messages — e.g. `hubspot conversations threads list --inbox-id <id> --associated-ticket-id <ticket_id>` pulls the chat thread behind a ticket. Run `hubspot conversations --help` for the full surface.

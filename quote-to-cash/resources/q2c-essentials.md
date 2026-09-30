@@ -3,7 +3,7 @@
 Minimal field reference — for the full property list run
 `hubspot properties list --type products|line_items|quotes|invoices|subscriptions`.
 For any enum, verify the API values with
-`hubspot properties get --type <type> --name <property>` and read the `options[].value` field.
+`hubspot properties options-list --type <type> <property> | jq -r '.value'`.
 
 ## The six fields that matter
 
@@ -20,8 +20,9 @@ For any enum, verify the API values with
 
 `discount` is the writable percentage (e.g. `10` for 10% off). `hs_total_discount` is
 HubSpot-computed and should not be set by hand. Confirm in your portal before relying on
-this — `hubspot properties get --type line_items --name discount` and
-`... --name hs_total_discount` will show `modificationMetadata.readOnlyValue`.
+this — `hubspot properties get --type line_items discount` and
+`hubspot properties get --type line_items hs_total_discount` (property name is positional)
+will show `modificationMetadata.readOnlyValue`.
 
 ## Associations
 

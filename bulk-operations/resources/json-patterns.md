@@ -8,18 +8,38 @@ These are the reshapes you actually use. Skip anything you can derive.
 
 ## Read → update
 
+`objects update` is irreversible — dry-run first, then re-pipe the SAME payload with the digest/confirm lifted from the preview line.
+
 ```bash
 hubspot objects search --type contacts --filter "industry=Tech" \
 | jq -c '{id, properties:{lifecyclestage:"marketingqualifiedlead"}}' \
-| hubspot objects update --type contacts
+| hubspot objects update --type contacts --dry-run \
+| tee /tmp/update.preview.jsonl
+
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/update.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/update.preview.jsonl)   # single: record ID; batch of 2+: row count
+
+hubspot objects search --type contacts --filter "industry=Tech" \
+| jq -c '{id, properties:{lifecyclestage:"marketingqualifiedlead"}}' \
+| hubspot objects update --type contacts --digest "$digest" --confirm "$confirm"
 ```
 
 ## Read → delete
 
+`objects delete` is irreversible — dry-run first, then re-pipe the SAME inputs with the digest/confirm lifted from the preview line.
+
 ```bash
 hubspot objects search --type contacts --filter "!email" \
 | jq -c '{id}' \
-| hubspot objects delete --type contacts --dry-run
+| hubspot objects delete --type contacts --dry-run \
+| tee /tmp/delete.preview.jsonl
+
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/delete.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/delete.preview.jsonl)   # single: record ID; batch of 2+: row count
+
+hubspot objects search --type contacts --filter "!email" \
+| jq -c '{id}' \
+| hubspot objects delete --type contacts --digest "$digest" --confirm "$confirm"
 ```
 
 ## Read → batch get (one call, no xargs)
@@ -32,11 +52,21 @@ hubspot associations list --from companies:67890 --to contacts \
 
 ## CSV → upsert
 
+`objects upsert` is irreversible — dry-run first, then re-pipe the SAME payload with the digest/confirm from the preview (upsert confirm = the row count, even for one row).
+
 ```bash
 # external.csv: email,firstname,lastname,company
 tail -n +2 external.csv \
 | jq -R -c 'split(",") | {idProperty:"email", id:.[0], properties:{firstname:.[1], lastname:.[2], company:.[3]}}' \
-| hubspot objects upsert --type contacts --dry-run
+| hubspot objects upsert --type contacts --dry-run \
+| tee /tmp/upsert.preview.jsonl
+
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/upsert.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/upsert.preview.jsonl)   # upsert confirm = the row count
+
+tail -n +2 external.csv \
+| jq -R -c 'split(",") | {idProperty:"email", id:.[0], properties:{firstname:.[1], lastname:.[2], company:.[3]}}' \
+| hubspot objects upsert --type contacts --digest "$digest" --confirm "$confirm"
 ```
 
 ## Read → association create

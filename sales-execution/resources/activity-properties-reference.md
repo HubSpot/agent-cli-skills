@@ -1,6 +1,6 @@
 # Activity Properties — Quick Reference
 
-Property names and enum values for `hubspot objects create --type {calls|notes|meetings|tasks}`. Kept here because `hubspot properties list --type calls` is noisy (~80 props) and `hubspot properties get` does not expose enum option values today — so the values below are not otherwise discoverable from the CLI. Verify against the portal if a value is rejected.
+Property names and enum values for `hubspot objects create --type {calls|notes|meetings|tasks}`. Kept here because `hubspot properties list --type calls` is noisy (~80 props); for the live per-portal option values run `hubspot properties options-list --type calls <property>` (and for call outcomes, `hubspot activities calls dispositions list`). The values below are the shortcut — verify against the portal if a value is rejected.
 
 ## calls
 
@@ -11,7 +11,7 @@ Property names and enum values for `hubspot objects create --type {calls|notes|m
 | `hs_call_direction` | enum | `INBOUND` `OUTBOUND` |
 | `hs_call_status` | enum | `BUSY` `CALLING_CRM_USER` `CANCELED` `COMPLETED` `CONNECTING` `FAILED` `IN_PROGRESS` `MISSED` `NO_ANSWER` `QUEUED` `RINGING` |
 | `hs_call_duration` | number | Milliseconds (60000 = 1 min) |
-| `hs_call_disposition` | string | Portal-defined outcome code |
+| `hs_call_disposition` | string | Portal-defined outcome code — list ids with `hubspot activities calls dispositions list`, then set `hs_call_disposition=<id>` |
 | `hs_timestamp` | number | **Required.** Unix ms — when the call happened |
 
 ## notes

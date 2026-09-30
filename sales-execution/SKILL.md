@@ -15,7 +15,7 @@ triggers:
 
 | File | When to use |
 |---|---|
-| `resources/activity-properties-reference.md` | Property names and enum values for calls/notes/meetings/tasks. Keep open while writing `objects create` — enum values are not discoverable via `hubspot properties get` today. |
+| `resources/activity-properties-reference.md` | Property names and enum values for calls/notes/meetings/tasks. Keep open while writing `objects create` — for live enum values run `hubspot properties options-list --type calls <property>`, and for call outcomes `hubspot activities calls dispositions list`; the reference is the shortcut. |
 
 Read `bulk-operations/SKILL.md` first — this skill assumes its batching, pipe, and dry-run patterns.
 
@@ -31,7 +31,7 @@ Read `bulk-operations/SKILL.md` first — this skill assumes its batching, pipe,
 | `objects get --type calls <id>` returns | `properties.hs_timestamp` | Unix ms (string) |
 | `activities list --contact <id>` returns | `timestamp` (flat, top-level) | **ISO 8601** (e.g. `2024-01-15T10:00:00Z`) |
 
-Current Unix ms: `$(date +%s)000` (macOS) or `$(date +%s%3N)` (Linux). `activities list` rows are `{"id","type","timestamp","title","body","status","owner_id"}` — the cross-type timeline read shape, no raw property names.
+Current Unix ms: `$(date +%s)000` (macOS) or `$(date +%s%3N)` (Linux). `activities list` rows are `{"id","type","timestamp","lastModified","title","body","status","owner_id"}` — the cross-type timeline read shape, no raw property names.
 
 ## Create + associate, by type
 
@@ -77,7 +77,7 @@ hubspot associations create --from tasks:$task_id --to deals:456
 
 ## Open tasks for a contact — two CLI calls, no xargs
 
-`associations list` emits `{"id","type"}` per row; `objects get` reads from stdin in one batch call (see `bulk-operations/SKILL.md` "Read in batch").
+`associations list` emits `{"id": …}` per row (plus label/associationType fields); `objects get` reads from stdin in one batch call (see `bulk-operations/SKILL.md` "Read in batch").
 
 ```bash
 hubspot associations list --from contacts:149 --to tasks \
@@ -129,8 +129,8 @@ paste \
 | hubspot associations create
 ```
 
-For >100 rows, apply the dry-run / digest / confirm pattern from `bulk-operations/SKILL.md`.
+These are `objects create` calls (Additive) — creates are never digest-gated, so `--dry-run` is a plain preview and you execute by dropping it (no digest/confirm). The digest flow only applies to the irreversible writes (`update`/`upsert`/`delete`/`merge`) in `bulk-operations/SKILL.md`.
 
 ## Known constraints
 
-Activities must be associated immediately or they're invisible in the CRM UI. `properties get` doesn't return enum option values for activity types — use the reference. Sales Hub sequences are read-only in the CLI (`hubspot sequences list` / `get` / `enrollments`, `automation.sequences.read` scope) — the CLI cannot enroll a contact in a sequence, so drive outreach via tasks/activities above. This surface grows; recheck `hubspot --help` / `CHANGELOG.md` before assuming an API is missing.
+Activities must be associated immediately or they're invisible in the CRM UI. For enum option values on activity properties, run `hubspot properties options-list --type calls <property>` (and for call outcomes, `hubspot activities calls dispositions list`); the reference is the shortcut. Sales Hub sequences are read-only in the CLI (`hubspot sequences list` / `get` / `enrollments`, `automation.sequences.read` scope) — the CLI cannot enroll a contact in a sequence, so drive outreach via tasks/activities above. This surface grows; recheck `hubspot --help` / `CHANGELOG.md` before assuming an API is missing.

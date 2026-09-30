@@ -31,7 +31,7 @@ hubspot objects search --type contacts \
 
 ### Subscription past-due / cancelled
 
-`hs_subscription_status` enum is portal-specific — run `hubspot properties get --type subscriptions hs_subscription_status` and substitute the exact value. Requires the `subscriptions-read` scope on your token.
+`hs_subscription_status` enum is portal-specific — run `hubspot properties options-list --type subscriptions hs_subscription_status | jq -r '.value'` and substitute the exact value. Requires the `subscriptions-read` scope on your token.
 
 ```bash
 hubspot objects search --type subscriptions \

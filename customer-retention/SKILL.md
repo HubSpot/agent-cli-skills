@@ -54,7 +54,7 @@ To audit *why* a customer churned or moved stage — which workflow, integration
 `subscriptions` is a standard object (`hubspot objects types` confirms). Enum values for `hs_subscription_status` are portal-specific — verify before filtering, then plug the exact value in:
 
 ```bash
-hubspot properties get --type subscriptions hs_subscription_status   # lists allowed values
+hubspot properties options-list --type subscriptions hs_subscription_status   # allowed values
 
 # Past-due — revenue at immediate risk (substitute your verified value)
 hubspot objects search --type subscriptions \
@@ -80,7 +80,7 @@ hubspot associations create --from tasks:$task_id --to contacts:<contact_id>
 
 ## 4 — Bulk task creation for a cohort
 
-Pipe a search through `jq` into one `objects create` call, then associate. Preview with `--dry-run` first (`bulk-operations` covers digest/confirm for >100 rows).
+Pipe a search through `jq` into one `objects create` call, then associate. `objects create` is Additive — never digest-gated — so `--dry-run` is a plain preview and you execute by dropping it (no digest/confirm). The digest flow only applies to the irreversible writes in `bulk-operations/SKILL.md`.
 
 ```bash
 DUE_MS=$(( ($(date +%s) + 2*86400) * 1000 ))   # due in 2 days
@@ -104,18 +104,17 @@ jq -c --arg due "$DUE_MS" '{
 jq -c '{properties}' /tmp/task_payloads.jsonl | hubspot objects create --type tasks --dry-run | head
 jq -c '{properties}' /tmp/task_payloads.jsonl | hubspot objects create --type tasks > /tmp/created.jsonl
 
-# 4. Associate each new task to its contact (paste preserves order)
+# 4. Associate each new task to its contact — one piped call (associations create batches 100 pairs/API call; paste preserves order)
 paste <(jq -r '.id' /tmp/created.jsonl) <(jq -r '.contact_id' /tmp/task_payloads.jsonl) \
-  | while read task_id contact_id; do
-      hubspot associations create --from tasks:$task_id --to contacts:$contact_id
-    done
+  | jq -cR 'split("\t") | {from:("tasks:" + .[0]), to:("contacts:" + .[1])}' \
+  | hubspot associations create
 ```
 
-One CLI call for the search, one for the create, then N for associations — no `xargs -I{}` per record. The output-order guarantee of `objects create` (one result per stdin line, in order — see `bulk-operations` "Output shape") is what makes the `paste` correct.
+One CLI call for the search, one for the create, and one for all associations — no `xargs -I{}` per record. The output-order guarantee of `objects create` (one result per stdin line, in order — see `bulk-operations` "Output shape") is what makes the `paste` correct.
 
 ## Known gaps
 
 - No native churn-score / health-score property — track via a custom property.
 - `hubspot segments` provides CRM lists for re-engagement cohorts — `segments members-list` pulls a list's members, and `segments create` / `update-filters` save an at-risk audience as a reusable list. Re-engagement enrollment can be built as a workflow via `hubspot workflows create` / `update` (see `workflow-automation/SKILL.md`).
 - `hubspot sequences` reads Sales Hub sequences (read-only): use `sequences enrollments <contact_id>` to see whether an at-risk customer was ever engaged through a sales sequence. Sequences are a product API (Sales Hub Professional+, `automation.sequences.read` scope), not a CRM object type — the CLI cannot create sequences or enroll contacts. This list grows over time; recheck `hubspot --help` / `CHANGELOG.md` rather than assuming an API is absent.
-- `hubspot associations create` does not batch — one CLI call per pair.
+- `hubspot associations create` batches stdin JSONL (up to 100 pairs per API call) — pipe the pairs in one call instead of looping.

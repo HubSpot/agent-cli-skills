@@ -1,6 +1,6 @@
 # Contact segmentation filter cookbook
 
-Filter expressions for `hubspot objects search --type contacts`. Add `--properties` to control output. See `audience-targeting/SKILL.md` for syntax rules and `bulk-operations/SKILL.md` for pagination, piping, and destructive-op flow. Discover enum option values per portal with `hubspot objects list --type contacts --properties <name> --limit 100 --format json | jq -r '.data[].properties.<name> // empty' | sort -u`.
+Filter expressions for `hubspot objects search --type contacts`. Add `--properties` to control output. See `audience-targeting/SKILL.md` for syntax rules and `bulk-operations/SKILL.md` for pagination, piping, and destructive-op flow. Discover enum option values per portal with `hubspot properties options-list --type contacts <name> | jq -r '.value'` (fallback, to see values actually in use: `hubspot objects list --type contacts --properties <name> --limit 100 --format json | jq -r '.data[].properties.<name> // empty' | sort -u`).
 
 ---
 

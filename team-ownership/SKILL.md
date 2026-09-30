@@ -43,24 +43,29 @@ hubspot objects search --type deals --filter "!hubspot_owner_id" --properties de
 
 ## 3. Bulk reassign — search → update
 
-Reshape each search row into `{id, properties:{hubspot_owner_id}}` and pipe to `objects update`. Always dry-run first; for >100 rows the dry-run emits a digest + `apply_command_hint` — re-run with `--digest`/`--confirm` (see `bulk-operations/SKILL.md` § "Safe destructive workflow").
+Reshape each search row into `{id, properties:{hubspot_owner_id}}` and pipe to `objects update`. `objects update` is irreversible, so dry-run first: the dry-run emits a digest + `apply_command_hint` at every size (confirm = the record ID for one record, the row count for a batch). Then re-run with `--digest`/`--confirm` (see `bulk-operations/SKILL.md` § "Safe destructive workflow").
 
 ```bash
 # Dry-run
 hubspot objects search --type contacts --filter "hubspot_owner_id=$FROM_ID" \
 | jq -c --arg to "$TO_ID" '{id, properties:{hubspot_owner_id:$to}}' \
-| hubspot objects update --type contacts --dry-run
+| hubspot objects update --type contacts --dry-run \
+| tee /tmp/reassign.preview.jsonl
 
-# Execute — ≤100: drop --dry-run.  >100: append --digest <hash> --confirm <count>.
+# Execute — lift the digest + confirm from the preview line (required at every size)
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/reassign.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/reassign.preview.jsonl)   # single: record ID; batch: row count
+
 hubspot objects search --type contacts --filter "hubspot_owner_id=$FROM_ID" \
 | jq -c --arg to "$TO_ID" '{id, properties:{hubspot_owner_id:$to}}' \
-| hubspot objects update --type contacts
+| hubspot objects update --type contacts --digest "$digest" --confirm "$confirm"
 ```
 
-Single-record assignment — no stdin, no jq:
+Single-record assignment — no stdin, no jq. Still irreversible, so dry-run first (confirm = the record ID):
 
 ```bash
-hubspot objects update --type contacts 12345 --property hubspot_owner_id=$TO_ID
+hubspot objects update --type contacts 12345 --property hubspot_owner_id=$TO_ID --dry-run
+hubspot objects update --type contacts 12345 --property hubspot_owner_id=$TO_ID --digest <hash> --confirm 12345
 ```
 
 ## 4. Rep-leaves workflow
@@ -79,7 +84,7 @@ for type in contacts companies deals tickets; do
 done
 ```
 
-Review each digest line, then re-run without `--dry-run` (adding `--digest`/`--confirm` per type when escalated). Mis-reassigned? `hubspot history --since 1h` lists the affected IDs.
+Review each digest line, then re-run per type with the `--digest`/`--confirm` lifted from that type's preview line (required at every size; confirm = the row count for a batch, the record ID for a single). Mis-reassigned? `hubspot history --since 1h` lists the affected IDs.
 
 ## 5. Team-level views (client-side grouping)
 
