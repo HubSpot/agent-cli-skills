@@ -13,7 +13,7 @@ triggers:
 
 ## Source of truth
 
-`hubspot schemas --help` is authoritative. Subcommands: `list`, `get`, `create`, `update` (metadata only), `delete` (destructive). Schema writes require a private app token with `crm.schemas.custom.write`. Read `bulk-operations/SKILL.md` first — every command here uses its JSONL conventions, and `schemas delete` uses its dry-run / digest / confirm flow.
+`hubspot schemas --help` is authoritative. Subcommands: `list`, `get`, `create`, `update` (metadata only), `delete` (destructive). `schemas list`/`get`/`create`/`update` work under OAuth login or a service key; `schemas delete` is service-key-only (`AppTokenOnly`) — set `HUBSPOT_ACCESS_TOKEN`. Read `bulk-operations/SKILL.md` first — every command here uses its JSONL conventions, and `schemas delete` uses its dry-run / digest / confirm flow.
 
 ## Discover existing schemas
 
@@ -28,7 +28,7 @@ hubspot objects types | jq -c 'select(.source=="custom")'  # same set, also show
 ## Inspect one schema
 
 ```bash
-hubspot schemas get pets
+hubspot schemas get --type pets
 ```
 
 Returns the full definition — properties, associations, labels, `requiredProperties`, `primaryDisplayProperty`, `fullyQualifiedName`. Reshape with `jq` as needed (see `bulk-operations/resources/json-patterns.md`).
@@ -62,7 +62,7 @@ Add more properties later with `hubspot properties create --type <name> ...`.
 `update` patches labels / description only. Property edits go through `hubspot properties`.
 
 ```bash
-echo '{"labels":{"singular":"Device","plural":"Devices"}}' | hubspot schemas update equipment
+echo '{"labels":{"singular":"Device","plural":"Devices"}}' | hubspot schemas update --type equipment
 ```
 
 `update` also supports `--dry-run` → digest → re-run with `--digest --confirm <name>` (see `bulk-operations/SKILL.md` for the pattern).
@@ -74,9 +74,9 @@ Schema delete is destructive and irreversible — it permanently removes the sch
 Follow the three-step flow documented in `bulk-operations/SKILL.md` ("Safe destructive workflow"). For schemas, the confirm value is the schema name:
 
 ```bash
-hubspot schemas delete equipment --dry-run
+hubspot schemas delete --type equipment --dry-run
 # → digest=blast-... ; apply_command_hint shows: --digest <hash> --confirm 'equipment'
-hubspot schemas delete equipment --digest <hash> --confirm equipment
+hubspot schemas delete --type equipment --digest <hash> --confirm equipment
 ```
 
 Check `hubspot history --since 24h --kind MetadataDestroy` to audit recent schema deletes.
