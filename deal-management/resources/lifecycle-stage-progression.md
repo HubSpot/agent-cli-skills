@@ -32,6 +32,8 @@ hubspot objects update --type contacts <id> --property lifecyclestage=opportunit
 hubspot objects update --type contacts <id> --property lifecyclestage=customer
 ```
 
+`objects update` is irreversible, so each of these single-contact updates requires the dry-run → digest → confirm flow — run with `--dry-run` first, then re-run with `--digest <hash> --confirm <id>` (`--confirm` = the contact ID for these single updates). See `bulk-operations/SKILL.md` § "Safe destructive workflow".
+
 HubSpot may auto-update `lifecyclestage` when a deal associates or closes — but don't rely on that in scripts. Set it explicitly.
 
 ## `hs_lead_status` quick reference
