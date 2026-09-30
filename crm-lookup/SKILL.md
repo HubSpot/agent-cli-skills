@@ -63,7 +63,7 @@ hubspot objects search --type deals --filter "dealname~acme" --properties dealna
 
 ## 4. Find all associated records (two CLI calls, not xargs)
 
-Pattern: `associations list` → `jq -c '{id}'` → `objects get` batch. **Never** `xargs -I{} hubspot objects get …` — that spawns one process per record. Use **plural** in `--from` (`contacts:`, `companies:`, `deals:`); `--help` shows singular but only plural avoids a warning.
+Pattern: `associations list` → `jq -c '{id}'` → `objects get` batch. **Never** `xargs -I{} hubspot objects get …` — that spawns one process per record. Use **plural** in `--from` (`contacts:12345`), exactly as `--help` shows.
 
 ```bash
 # All contacts at a company
