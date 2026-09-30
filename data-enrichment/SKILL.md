@@ -14,14 +14,14 @@ Prereq: read `bulk-operations/SKILL.md` first — JSONL piping, dry-run/digest, 
 
 ## The core move: upsert, not search-then-create
 
-`hubspot objects upsert --type X --id-property <natural-key>` reads JSONL on stdin and creates-or-updates each row in **one CLI call per record**, keyed by a property (email for contacts, domain for companies). No race window, no branching. Do not loop `search` → empty? → `create`.
+`hubspot objects upsert --type X --id-property <natural-key>` reads JSONL on stdin and creates-or-updates each row in **one CLI call** (the CLI batches 100 rows per API request), keyed by a property (email for contacts, domain for companies). No race window, no branching. Do not loop `search` → empty? → `create`.
 
 Per line in: `{"id":"jane@example.com","properties":{"firstname":"Jane","jobtitle":"VP"}}`
-Per line out: `{"id":"123","ok":true,"data":{...,"new":true|false}}` or `{"ok":false,"error":{...}}`. Order matches input.
+Per line out: `{"id":"123","ok":true,"data":{...}}` or `{"ok":false,"error":{...}}`. Order matches input. The CLI adds no fields of its own — `data` is the raw batch-upsert API result row.
 
 ## CSV/JSONL → upsert stream
 
-Reshape with `jq`, preview with `--dry-run`, then execute. Always lowercase the natural key — CRM match is exact. Confirm available property names with `hubspot properties list --type contacts`; never hard-code a list. See `bulk-operations/resources/json-patterns.md` for reshape idioms.
+Reshape with `jq`, preview with `--dry-run`, then execute. `upsert` is irreversible, so the execute step re-pipes the SAME inputs plus the `--digest`/`--confirm` lifted from the preview line (upsert confirm = the row count, always). Always lowercase the natural key — CRM match is exact. Confirm available property names with `hubspot properties list --type contacts`; never hard-code a list. See `bulk-operations/resources/json-patterns.md` for reshape idioms.
 
 ```bash
 # CSV → JSONL (any tool); example using csvkit
@@ -30,12 +30,17 @@ csvjson external.csv | jq -c '.[]' > external.jsonl
 # Preview
 cat external.jsonl \
 | jq -c '{id:(.email|ascii_downcase), properties:{firstname:.first, lastname:.last, jobtitle:.title, company:.company}}' \
-| hubspot objects upsert --type contacts --id-property email --dry-run | head
+| hubspot objects upsert --type contacts --id-property email --dry-run \
+| tee /tmp/upsert.preview.jsonl
 
-# Execute (same pipeline, drop --dry-run, capture results)
+# Lift the digest + confirm (present at every row count; upsert confirm = the row count)
+digest=$(jq -r 'select(.digest != null) | .digest' /tmp/upsert.preview.jsonl)
+confirm=$(jq -r 'select(.digest != null) | .target.id' /tmp/upsert.preview.jsonl)
+
+# Execute — same pipeline, plus --digest/--confirm, capture results
 cat external.jsonl \
 | jq -c '{id:(.email|ascii_downcase), properties:{firstname:.first, lastname:.last, jobtitle:.title, company:.company}}' \
-| hubspot objects upsert --type contacts --id-property email \
+| hubspot objects upsert --type contacts --id-property email --digest "$digest" --confirm "$confirm" \
 | tee /tmp/upsert.results.jsonl
 ```
 
@@ -49,8 +54,9 @@ Split with `jq`, inspect failure modes, retry just the failures after fixing the
 jq -c 'select(.ok==true)'  /tmp/upsert.results.jsonl > /tmp/upsert.ok.jsonl
 jq -c 'select(.ok==false)' /tmp/upsert.results.jsonl > /tmp/upsert.failed.jsonl
 jq -r '.error.status' /tmp/upsert.failed.jsonl | sort | uniq -c   # status → count
-jq -r '.data.new'    /tmp/upsert.ok.jsonl     | sort | uniq -c   # created vs updated
 ```
+
+The CLI does not tag rows as created-vs-updated. If the batch-upsert API result row carries a `new` boolean, `jq -r '.data.new' /tmp/upsert.ok.jsonl | sort | uniq -c` splits them; otherwise compare `.data.createdAt` against `.data.updatedAt`.
 
 429s: split the input and rerun smaller chunks (see `bulk-operations` rate-limit notes). 400s usually mean a bad property name or invalid enum value — fix the reshape, rerun the failed inputs.
 
