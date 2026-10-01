@@ -51,7 +51,7 @@ Every read command (`list`, `search`, `get`) emits JSONL — one JSON object per
 
 `--properties email,firstname` limits which fields the server returns under `.properties`. Downstream `jq` should use `.properties.email`, not `.prop_email`.
 
-Write commands (`create`, `update`, `upsert`, `delete`, `merge`, `associations create`) accept JSONL on stdin and emit JSONL — one result per input line: `{"id":"123","ok":true,"data":{...}}` or `{"id":"123","ok":false,"error":{"status":...,"message":"..."}}`. Order of results matches input order.
+Write commands (`create`, `update`, `upsert`, `delete`, `merge`, `associations create`) accept JSONL on stdin and emit JSONL — one result per input line: `{"id":"123","ok":true,"data":{...}}` or `{"id":"123","ok":false,"error":{"status":...,"message":"..."}}`. Order of results matches input order — safe to join by line position.
 
 ## Read in batch — never one-by-one
 
@@ -104,6 +104,10 @@ bash resources/pagination-loop.sh deals /tmp/deals.jsonl
 ```
 
 The script pages through `--after` cursors automatically, prints progress to stderr, and writes JSONL to the output file. Run it as a single foreground command — do not background it or reconstruct the loop inline.
+
+## Result ordering
+
+`search` returns newest-first by default — it sorts descending on whichever create-date property the object type defines (`createdate` for contacts, `hs_createdate` for activities, and so on) — so the first page holds the most recent records rather than the portal's 2017-era ones. Sort on any other sortable property with `--sort <property>` (`hs_lastmodifieddate`, `amount`, ...) and flip direction with `--sort-dir asc`. `list` has no sort control — use `search` when order matters.
 
 `associations list` also paginates (`--limit` / `--after`, default limit 100): under `--format json` the next-page cursor is at `.meta.next`, null once the last page is reached. A record can have far more associated records than one page holds, so treat a present cursor as "more remain" and page with `--after` until it is null.
 
@@ -194,7 +198,7 @@ cat external.jsonl \
 
 ## Rate-limit hygiene
 
-`objects delete` issues one API call per stdin line; `update`/`upsert` batch 100 rows per API call. Test with `head -n 50` before piping a 50k-row file — or use `hubspot imports` for purpose-built bulk ingest. If the API starts 429ing, the per-line output will show `{"ok":false,"error":{"status":429,...}}` — split your input file and retry the failed lines.
+`create`, `update`, and `upsert` batch stdin into chunks of up to 100 and call the real `batch/create` / `batch/update` / `batch/upsert` endpoints — one API call per 100 lines, not per line. `delete` issues one API call per stdin line. Test with `head -n 50` before piping a 50k-row file — or use `hubspot imports` for purpose-built bulk ingest. If the API starts 429ing, the per-line (or per-chunk) output will show `{"ok":false,"error":{"status":429,...}}` — split your input file and retry the failed lines.
 
 For large CSV ingests, `hubspot imports` is the purpose-built path: `imports start` (from a CSV file + import-request JSON; supports `--dry-run`), `imports list`, `imports get <id>`, `imports cancel <id>` (irreversible — dry-run first, then `--digest`/`--confirm` with the import ID), and `imports errors <id>`. Run `hubspot imports --help` for the request shape.
 
