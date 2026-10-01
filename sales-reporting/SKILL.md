@@ -24,7 +24,7 @@ triggers:
 - **Numeric properties can be `null` *or* an empty string (`""`)** when unset/blank. `tonumber` aborts on `""`. Always guard with `select(. != null and . != "") | tonumber`.
 - In `--filter` expressions, `hs_is_closed_won=true` and `hs_is_closed!=true` work — the API parses the value.
 - `--properties` returns the standard nested shape: `{"id":"123","properties":{"amount":"5000","dealname":"..."}}`. Reference fields as `.properties.amount` in jq.
-- Stage IDs in `dealstage` are portal-specific. Map them with `hubspot pipelines stages --type deals --pipeline <id>`. **`hubspot pipelines` is app-token-only** — see Auth section; it 403s under user OAuth.
+- Stage IDs in `dealstage` are portal-specific. Map them with `hubspot pipelines stages --type deals --pipeline <id>` (or read the `stages` array embedded in `hubspot pipelines list/get`). **`hubspot pipelines` is app-token-only** — see Auth section; it 403s under user OAuth.
 - `hubspot_owner_id` is a numeric string. Resolve to a name with `hubspot owners list` (fields: `id`, `firstName`, `lastName`, `email`). `hubspot owners list` works under both user OAuth (`hubspot auth login`) and a service key.
 
 ## 1. Daily briefing
@@ -153,7 +153,7 @@ Run `hubspot reports --help` for the full surface and the CRM-SQL grammar.
 
 ## Known limitations
 
-- `hubspot pipelines stages` does not expose stage probability — won/lost stages can't be auto-identified from the stages list. Use `hs_is_closed_won` on deals instead.
+- Won/lost stages are identifiable from `hubspot pipelines stages`: each stage's `metadata` carries `isClosed`/`probability` (e.g. `jq -r 'select(.metadata.probability=="1.0") | .id'`). `hs_is_closed_won` on the deal itself also works.
 - No team object — group by `hubspot_owner_id` and resolve names from `hubspot owners list` client-side.
 - `hubspot pipelines` is app-token-only and 403s under user OAuth. `hubspot owners list` works under user OAuth. Keep raw IDs + warn; do not fail the report when pipelines is unavailable.
 - Numeric CRM properties can be `null` or `""`; always guard `tonumber` with `select(. != null and . != "")`.
