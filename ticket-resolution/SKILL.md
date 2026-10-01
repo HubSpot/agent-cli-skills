@@ -25,11 +25,11 @@ hubspot pipelines list --type tickets --format table
 hubspot pipelines stages --type tickets --pipeline <pipeline_id> --format table
 ```
 
-The stage table prints each stage's `ID` and `Label` ("New", "Waiting on contact", "Closed", etc.).
+The stage table prints each stage's `ID` and `Label` ("New", "Waiting on contact", "Closed", etc.). `pipelines list`/`get` also return each pipeline's full `stages` array in `jsonl`/`json`, so one call is enough to map a `hs_pipeline_stage` value to its label.
 
 ## 2. Verify enum option values for THIS portal
 
-`hs_ticket_priority`, `hs_ticket_category`, and `hs_resolution` are all `enumeration` properties — option values are portal-configurable. List the allowed options directly with `properties options-list` (the old `objects update … --property hs_resolution=__probe__` probe no longer works — updates are digest-gated now):
+`hs_ticket_priority`, `hs_ticket_category`, and `hs_resolution` are all `enumeration` properties — option values are portal-configurable. List the allowed options directly with `properties options-list` (the old `objects update … --property hs_resolution=__probe__` probe no longer works — updates are digest-gated now). `properties get` returns the same `options` array inline if you want values and labels together:
 
 ```bash
 # List the allowed option values for each enum
