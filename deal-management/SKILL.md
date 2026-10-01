@@ -34,15 +34,23 @@ Pipeline and stage IDs are **portal-specific**. Always discover at runtime — n
 
 ```bash
 hubspot pipelines list --type deals --format jsonl
-# {"id":"default","label":"Sales Pipeline","displayOrder":0}
-# {"id":"a1b2c3d4-0000-0000-0000-000000000000","label":"Enterprise Pipeline","displayOrder":1}
+# {"id":"default","label":"Sales Pipeline","displayOrder":0,"stages":[...]}
+# {"id":"a1b2c3d4-0000-0000-0000-000000000000","label":"Enterprise Pipeline","displayOrder":1,"stages":[...]}
 
 hubspot pipelines stages --type deals --pipeline default --format jsonl
-# {"id":"appointmentscheduled","label":"Appointment Scheduled","displayOrder":0}
-# {"id":"qualifiedtobuy","label":"Qualified To Buy","displayOrder":1}
+# {"id":"appointmentscheduled","label":"Appointment Scheduled","displayOrder":0,"metadata":{"isClosed":"false","probability":"0.2"}}
+# {"id":"qualifiedtobuy","label":"Qualified To Buy","displayOrder":1,"metadata":{"isClosed":"false","probability":"0.4"}}
 # ...
-# {"id":"closedwon","label":"Closed Won","displayOrder":5}
-# {"id":"closedlost","label":"Closed Lost","displayOrder":6}
+# {"id":"closedwon","label":"Closed Won","displayOrder":5,"metadata":{"isClosed":"true","probability":"1.0"}}
+# {"id":"closedlost","label":"Closed Lost","displayOrder":6,"metadata":{"isClosed":"true","probability":"0.0"}}
+```
+
+`pipelines list`/`get` embed each pipeline's `stages`, so a single call gives you the
+stage id -> label map you need to translate a deal's `dealstage` GUID:
+
+```bash
+hubspot pipelines get --type deals default --format jsonl \
+  | jq -r '.stages[] | "\(.id)\t\(.label)"'
 ```
 
 Grab a specific stage ID by label:
