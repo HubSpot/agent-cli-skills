@@ -43,6 +43,7 @@ npx skills hubspot/agent-cli-skills/bulk-operations
 | `team-ownership` | Assign, reassign, and audit record ownership across contacts, deals, and companies |
 | `ticket-resolution` | Create and triage support tickets, move them through pipelines, and log resolution |
 | `visitor-identification` | Generate a Conversations visitor identification token for a known website visitor; guidance on scopes, tier requirements, and SDK integration |
+| `work` | Read and update HubSpot Work Management workspaces, projects, tables, table items/subitems, documents, and agents |
 | `workflow-automation` | List, create, update, and delete HubSpot workflows from the CLI |
 
 ---
